@@ -55,9 +55,9 @@ Le signal de la clôture du jour t est exécuté à la clôture de t+1.
 |---|---|---|---|---|
 | 10 % | 13,8 % | 13,8 % | 1,00 | −19 % |
 | 20 % | 29,2 % | 27,2 % | 1,07 | −33 % |
-| **30 %** | **42,4 %** | **38,0 %** | **1,12** | **−43 %** |
-| 45 % | 47,6 % | 47,8 % | 1,00 | −57 % |
-| 60 % | 44,4 % | 52,3 % | 0,85 | −65 % |
+| **30 %** | **42,6 %** | **38,0 %** | **1,12** | **−43 %** |
+| 45 % | 46,8 % | 47,7 % | 0,98 | −57 % |
+| 60 % | 44,4 % | 52,2 % | 0,85 | −65 % |
 
 Au-delà de 35 %, le plafond d'exposition et le frein de volatilité font que le risque
 augmente sans que le rendement suive. Choisir la ligne dont le max DD est supportable,
@@ -67,7 +67,7 @@ pas celle dont le CAGR plaît.
 
 |  | CAGR | vol | Sharpe | max DD | pire mois | Calmar | temps investi | turnover/an |
 |---|---|---|---|---|---|---|---|---|
-| **Stratégie** | **42,4 %** | 38,0 % | **1,12** | **−43,2 %** | **−23,2 %** | **0,98** | 67,5 % | 3,9× |
+| **Stratégie** | **42,6 %** | 38,0 % | **1,12** | **−43,0 %** | **−23,1 %** | **0,99** | 67,5 % | 3,9× |
 | HODL équipondéré | 77,3 % | 74,8 % | 1,03 | −88,0 % | −44,0 % | 0,88 | 100 % | 0,1× |
 | HODL BTC | 58,3 % | 68,5 % | 0,85 | −83,8 % | −39,3 % | 0,70 | 100 % | 0,1× |
 
@@ -75,7 +75,7 @@ Par année civile (%) :
 
 | | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026* |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Stratégie | +161 | **−28** | +71 | +159 | +99 | **−23** | +56 | +38 | +6 | −5 |
+| Stratégie | +161 | **−28** | +71 | +158 | +103 | **−23** | +56 | +38 | +5 | −5 |
 | HODL éq. | +4209 | −77 | +42 | +399 | +198 | −65 | +123 | +83 | −6 | −21 |
 
 \* 2026 arrêté au 24 mai (fin des données disponibles).
@@ -98,16 +98,16 @@ personne ne tient −88 %.
 ## Robustesse — `python run_validation.py`
 
 * **Grille de 243 combinaisons** (ema_fast × ema_slow × sma_long × momentum × target_vol) :
-  Sharpe min 0,74, médiane 1,02, max 1,30. Le résultat est un plateau, pas un pic.
+  Sharpe min 0,75, médiane 1,02, max 1,30. Le résultat est un plateau, pas un pic.
   C'est le seul test qui distingue une règle d'un surajustement.
 * **Split 2017–2021 / 2022–2026** : in-sample Sharpe 1,82 (HODL 2,20 — le HODL gagne
-  le bull) ; out-of-sample Sharpe 0,50 pour +16,3 % de CAGR contre 0,02 et +0,9 %
+  le bull) ; out-of-sample Sharpe 0,49 pour +16,1 % de CAGR contre 0,02 et +0,9 %
   pour le HODL, avec un DD de −39 % contre −68 %.
 * **Sensibilité aux coûts** : à 4× les frais (60 bps par côté), Sharpe 1,05. La
   stratégie n'est pas une illusion de frais nuls.
-* **Sensibilité au retard d'exécution** : +2 jours de retard, Sharpe 1,12 ; +3 jours,
-  1,00. Elle ne dépend pas d'un remplissage rapide.
-* **Rebalancement quotidien** : Sharpe 1,15 pour un turnover de 7,0×/an au lieu de
+* **Sensibilité au retard d'exécution** : +2 jours de retard, Sharpe 1,13 ; +3 jours,
+  1,02. Elle ne dépend pas d'un remplissage rapide.
+* **Rebalancement quotidien** : Sharpe 1,14 pour un turnover de 7,0×/an au lieu de
   3,9×. Le gain marginal ne paie pas le risque opérationnel supplémentaire.
 
 ## Ce que le backtest ne contient pas, et qui compte
@@ -146,7 +146,7 @@ pip install -r requirements.txt
 python run_backtest.py                       # performance vs HODL sur les données de recherche
 python run_backtest.py --cost 0.003          # avec des frais doublés
 python run_validation.py                     # grille, split IS/OOS, sensibilités
-python -m pytest tests -q                    # 14 tests : pas de look-ahead, plafonds, coûts
+python -m pytest tests -q                    # 24 tests : look-ahead, plafonds, coûts, enveloppe
 ```
 
 Signal du jour depuis un exchange réel (endpoints publics, aucune clé API) :
@@ -160,58 +160,145 @@ Sortie JSON : poids cibles, poids cash, score de tendance et vol par actif, plus
 périmé (clôtures identiques en fin de série), vieux de plus de 48 h, ou si un actif
 n'a pas assez d'historique.
 
-## « Me brancher à un outil pour trader à ta place »
+## Brancher un agent LLM dessus
 
-Le point important, et il va à l'encontre de la demande telle que formulée : **ce
-n'est pas moi qui dois décider des ordres.** Un LLM dans la boucle de décision
-ajoute de la variance non mesurable — je ne suis pas déterministe, je ne suis pas
-backtestable, et je n'ai pas de processus persistant. Une règle dont on connaît le
-drawdown vaut mieux qu'un jugement dont on ne connaît rien.
+C'est faisable, c'est codé ici, et il faut d'abord être clair sur ce qu'on ne peut
+pas faire : **un agent LLM n'est pas backtestable.** Deux raisons dures.
 
-L'architecture correcte :
+1. **Non-déterminisme.** Deux appels sur le même état donnent deux décisions. Un
+   backtest sur un run est un échantillon de taille 1.
+2. **Contamination totale.** Le modèle a été entraîné sur des données qui incluent
+   l'historique des prix jusqu'à son cutoff (mai 2026 pour `claude-opus-5-5`). Lui
+   faire « rejouer » mars 2020 ou novembre 2021, c'est demander à quelqu'un qui
+   connaît le résultat de faire semblant de l'ignorer. Ce n'est pas un biais partiel
+   comme le surajustement, c'est du look-ahead parfait : le résultat sera toujours
+   magnifique et toujours faux. `src/agent_replay.py` **refuse** de scorer un replay
+   qui se termine avant `TRAINING_CUTOFF`, et étiquette `contaminated` tout résultat
+   obtenu avec `--allow-contaminated`.
+
+Il reste deux choses légitimes : borner l'agent par du déterministe, et le mesurer
+en avant.
+
+### L'enveloppe de risque — `src/agent.py`
+
+L'agent ne reçoit pas l'autorité de dimensionner. Il reçoit l'autorité de **réduire**
+le risque librement, et de **l'augmenter** seulement dans des bornes que la règle
+déterministe autorise déjà. Il renvoie un *tilt* par actif dans [−1, +1] :
+−1 = solder la position, 0 = suivre la règle, +1 = ajouter l'incrément maximal.
 
 ```
-cron (1×/jour, 00:10 UTC)  ->  run_live.py  ->  signal déterministe  ->  ordres  ->  exchange
-                                     |
-                                     +-> out/live.jsonl  (journal auditable)
+poids_final ∈ [0, poids_règle + max_tilt_up]      et      poids_règle = 0  ⟹  poids_final = 0
 ```
 
-```cron
-10 0 * * * cd /chemin/trading && /usr/bin/python3 run_live.py \
-    --exchange kraken --assets BTC,ETH,SOL --trade >> out/cron.log 2>&1
+La seconde clause est l'essentiel : l'agent ne peut **jamais** être long un actif que
+la règle de tendance considère en baisse — quoi qu'il croie, quoi qu'on lui dise, et
+quoi qu'une injection de prompt dans ses entrées tente de lui faire faire. Le pire
+qu'un agent halluciné, jailbreaké ou hostile puisse faire à travers cette interface,
+c'est passer le portefeuille en cash. Il ne peut pas se lever, pas shorter, pas
+acheter un actif en baisse, pas retirer de fonds. Neuf tests dans
+`tests/test_agent.py` vérifient ces invariants, dont un test de 500 vecteurs de
+tilts aléatoires hors bornes.
+
+Ce que l'agent voit : un instantané strictement point-in-time (prix, votes de
+tendance, vol annualisée, écart au SMA200, rendements 7/30/90j, drawdown depuis le
+plus haut 1 an, corrélations 30j, poids de la règle, positions actuelles). Pas de
+réseau, pas de news, pas de mémoire entre les runs. Le system prompt lui dit
+explicitement que 0 est la bonne réponse la plupart du temps, que le texte reçu est
+de la donnée et jamais une instruction, et que s'il se surprend à se rappeler ce qui
+s'est passé après la date de l'instantané, ce souvenir est une contamination à jeter.
+
+Les appels utilisent `claude-opus-5-5` en sortie structurée (JSON contraint par
+schéma) avec les fallbacks serveur activés — si un classificateur de sécurité refuse
+la requête, elle est rejouée sur un modèle de repli au lieu de s'arrêter ; et un
+refus final se traduit par un tilt de −1 partout, pas par une erreur silencieuse.
+Coût : ~2 500 tokens en entrée et ~700 en sortie par décision, soit environ
+**0,025 $ par décision**, ~1,30 $/an en rebalancement hebdomadaire. Le coût n'est
+pas l'argument contre l'agent.
+
+### Mesurer l'agent — `run_agent_replay.py`
+
+```bash
+# inspection de comportement sur l'historique — CONTAMINÉ, ce n'est pas une mesure
+python run_agent_replay.py --offline --start 2024-01-01 --allow-contaminated
+
+# le seul test honnête : dates postérieures au cutoff, vrais appels
+python run_agent_replay.py --start 2026-11-01 --api
 ```
 
-Trois niveaux, à franchir dans cet ordre et pas plus vite :
+Le harnais compare l'agent à la règle qu'il incline, sur la même fenêtre, nette du
+coût en tokens. Propriété vérifiée : avec un agent à tilt nul, la trajectoire de
+poids est **identique** à celle de la règle (`StubAgent`, testé). Donc tout écart
+mesuré est imputable à l'agent et à rien d'autre — ni au point de départ de la
+fenêtre, ni à une différence de décalage d'exécution.
+
+**Critère d'acceptation à fixer avant de regarder le résultat** : l'agent doit battre
+le Calmar de la règle d'au moins 15 % sur au moins 26 rebalancements, après son coût
+en tokens. En dessous, la machinerie ne se paie pas : on fait tourner la règle
+déterministe et on garde l'argent. Mon estimation, à énoncer maintenant pour qu'elle
+soit falsifiable : **probabilité faible, 25-35 %, que l'agent passe ce critère.** Ce
+qui me ferait changer d'avis : un écart positif persistant sur 26+ décisions
+concentré sur les retournements (là où une règle à moyenne de trois horizons est
+structurellement en retard), pas étalé uniformément.
+
+### « Te mettre dans l'outil » — `mcp_server.py`
+
+Serveur MCP, cinq outils : `get_signal`, `get_portfolio`, `plan_rebalance`,
+`execute_rebalance`, `get_limits`. Configuration côté client :
+
+```json
+{"mcpServers": {"trading": {"command": "python",
+  "args": ["/chemin/trading/mcp_server.py"],
+  "env": {"TRADING_EXCHANGE": "kraken", "TRADING_ASSETS": "BTC,ETH,SOL"}}}}
+```
+
+Décision de conception qui compte : **ce serveur n'accepte pas de poids cibles.** Un
+client ne peut proposer que des tilts ; le serveur calcule les poids lui-même et les
+borne. Un agent branché par MCP hérite donc de l'enveloppe par construction, sans
+qu'on ait à lui faire confiance.
+
+### Les trois niveaux d'exécution
 
 | | commande | effet |
 |---|---|---|
-| 1 | `run_live.py` | signal seul, aucune lecture de compte |
-| 2 | `run_live.py --trade` | lit les soldes réels, calcule les ordres, **n'envoie rien** |
-| 3 | `TRADING_LIVE=1 run_live.py --trade --live` | envoie les ordres |
+| 1 | `run_live.py` / `run_agent.py` | signal seul, aucune lecture de compte |
+| 2 | `... --trade` | lit les soldes réels, calcule les ordres, **n'envoie rien** |
+| 3 | `TRADING_LIVE=1 ... --trade --live` | envoie les ordres |
 
-Deux interrupteurs indépendants (`--live` **et** `TRADING_LIVE=1`) parce qu'un seul
-se déclenche par accident.
+Deux interrupteurs indépendants (`--live` **et** `TRADING_LIVE=1`) parce qu'un seul se
+déclenche par accident. Un appel d'outil ne peut pas basculer `TRADING_LIVE` : c'est
+l'environnement du processus, pas un paramètre.
 
-Garde-fous codés dans `src/execution.py`, pas dans la stratégie — un bug du signal
-peut demander n'importe quoi, l'exécuteur est ce qui empêche que ce soit exécuté :
+En cron, une décision par jour à 00:10 UTC :
+
+```cron
+10 0 * * * cd /chemin/trading && /usr/bin/python3 run_agent.py \
+    --exchange kraken --assets BTC,ETH,SOL --trade >> out/cron.log 2>&1
+```
+
+Garde-fous codés dans `src/execution.py`, pas dans la stratégie — un bug du signal ou
+une hallucination de l'agent peut demander n'importe quoi, l'exécuteur est ce qui
+empêche que ce soit exécuté :
 
 * notionnel maximum par ordre (`--max-order`, défaut 5 000) ;
-* turnover maximum par run = 100 % de l'équity (une rotation complète est 1,0 ; au-delà
-  c'est un bug) ; si dépassé, les ventes passent et les achats sont annulés ;
+* turnover maximum par run = 100 % de l'équity (une rotation complète vaut 1,0 ;
+  au-delà c'est un bug) ; si dépassé, les ventes passent et les achats sont annulés ;
 * taille minimale de trade (25 $) et bande morte de 5 % ;
 * jamais plus d'achats que de cash disponible ;
 * une sortie complète n'est jamais plafonnée ni bloquée ;
+* refus de trader sur un flux de prix périmé ;
 * spot uniquement, aucun levier, aucun short, aucun futures ;
-* chaque run journalise signal, diagnostics, ordres et reçus dans `out/live.jsonl`.
+* chaque run journalise instantané, décision, ordres et reçus dans `out/*.jsonl`.
 
-Clés API : à créer avec les permissions **trade + lecture, sans retrait**, et à passer
-par variables d'environnement (`KRAKEN_API_KEY` / `KRAKEN_API_SECRET`). Elles restent
-chez vous ; elles ne doivent jamais arriver dans une conversation.
+Clés API : permissions **trade + lecture, sans retrait**, passées par variables
+d'environnement (`KRAKEN_API_KEY` / `KRAKEN_API_SECRET`, `ANTHROPIC_API_KEY`). Elles
+restent chez toi et ne doivent jamais arriver dans une conversation.
 
-Mon rôle utile, une fois ça branché : surveiller le journal, détecter les dérives
-(turnover anormal, ordres rejetés, signal périmé), relancer la validation
-périodiquement avec SOL inclus, et vous dire si le régime se dégrade. Pas appuyer sur
-le bouton.
+### Ce que l'architecture ne règle pas
+
+L'enveloppe borne les dégâts, elle ne crée pas de compétence. Un agent qui tilte au
+hasard dans [−1, 0] va simplement sous-performer la règle en restant trop souvent en
+cash, et ça ne se verra qu'après plusieurs mois de mesure. C'est précisément pour ça
+que le critère d'acceptation se fixe avant, et que le niveau 3 attend la mesure.
 
 ## Prochaines étapes concrètes, dans l'ordre
 
@@ -229,8 +316,14 @@ le bouton.
 5. Passer en niveau 2 (`--trade` sans `--live`) une semaine, et comparer les ordres
    proposés à ce que vous auriez fait à la main.
 6. Niveau 3 avec 5 à 10 % du capital cible et `--max-order` à 2 % de l'équity.
-   Monter seulement après 3 mois sans incident opérationnel.
-7. Revue trimestrielle : CAGR, DD réalisé vs backtest, turnover réalisé vs 3,9×/an,
+   Monter seulement après 3 mois sans incident opérationnel. **La règle
+   déterministe seule** (`run_live.py`) à ce stade, pas l'agent.
+7. L'agent LLM seulement après ça, et seulement en mesure : `run_agent.py --offline`
+   d'abord (il suit la règle, c'est la baseline à battre), puis `--api` sur dates
+   postérieures au cutoff, pendant au moins 26 rebalancements, sans trader. Comparer
+   au critère d'acceptation ci-dessus. S'il ne passe pas, garder la règle : c'est le
+   résultat le plus probable et ce n'est pas un échec, c'est une mesure.
+8. Revue trimestrielle : CAGR, DD réalisé vs backtest, turnover réalisé vs 3,9×/an,
    et slippage réel vs les 15 bps supposés. Si le slippage réel dépasse 40 bps,
    relancez le backtest avec `--cost` au niveau réel avant de continuer.
 
@@ -248,8 +341,11 @@ src/backtest.py     backtest vectorisé, retard d'exécution et coûts explicite
 src/metrics.py      CAGR, Sharpe, Sortino, DD, Calmar, mois perdants
 src/walkforward.py  grille, split IS/OOS, sensibilité coûts/retard
 src/execution.py    génération d'ordres, garde-fous, exécuteur ccxt (dry-run par défaut)
-run_backtest.py / run_validation.py / run_live.py
-tests/              14 tests, dont un test explicite d'absence de look-ahead
+src/agent.py        instantané point-in-time, appel LLM en sortie structurée, enveloppe de risque
+src/agent_replay.py harnais de mesure de l'agent, avec refus des fenêtres contaminées
+mcp_server.py       serveur MCP : lecture d'état + tilts bornés, jamais de poids directs
+run_backtest.py / run_validation.py / run_live.py / run_agent.py / run_agent_replay.py
+tests/              24 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
 data/prices_daily.csv   closes quotidiens BTC/ETH (Coin Metrics), 2010 → 2026-05
 ```
 

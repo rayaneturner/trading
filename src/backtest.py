@@ -22,9 +22,17 @@ def _effective_weights(prices: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFram
 
 
 def run(prices: pd.DataFrame, cfg: StrategyConfig = DEFAULT) -> dict:
+    return run_from_weights(prices, _effective_weights(prices, cfg), cfg)
+
+
+def run_from_weights(prices: pd.DataFrame, weights: pd.DataFrame,
+                     cfg: StrategyConfig = DEFAULT) -> dict:
+    """Backtest an arbitrary weight path. `weights` must already be lagged, i.e. row
+    t is what was actually held into day t — callers that produce weights from a
+    decision made on close t must shift them before passing them in."""
     prices = prices.sort_index()
     asset_rets = prices.pct_change().fillna(0.0)
-    weights = _effective_weights(prices, cfg)
+    weights = weights.reindex(prices.index).fillna(0.0)
 
     # Held weights earn tomorrow's return.
     held = weights.shift(1).fillna(0.0)

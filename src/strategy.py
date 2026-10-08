@@ -77,6 +77,9 @@ def apply_rebalance_schedule(weights: pd.DataFrame, cfg: StrategyConfig = DEFAUL
     This is where most of the turnover (and therefore most of the cost) is
     killed. It is applied to the *target*, so the backtest and the live
     executor share one definition of "what we should be holding today".
+
+    Held weights are rescaled whenever the band would leave the portfolio above
+    `max_gross`: on spot that would mean buying with cash that does not exist.
     """
     held = np.zeros(weights.shape[1])
     out = np.empty(weights.shape)
@@ -92,6 +95,11 @@ def apply_rebalance_schedule(weights: pd.DataFrame, cfg: StrategyConfig = DEFAUL
             # a band must never trap us in a position the signal has dropped.
             move |= (desired == 0.0) & (held > 0.0)
             held = np.where(move, desired, held)
+            # The band can leave stale legs whose sum exceeds the gross cap, which
+            # on spot means spending cash we do not have. Scale back to the cap.
+            gross = held.sum()
+            if gross > cfg.max_gross:
+                held = held * (cfg.max_gross / gross)
         out[i] = held
 
     return pd.DataFrame(out, index=index, columns=weights.columns)

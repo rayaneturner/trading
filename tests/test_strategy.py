@@ -62,3 +62,13 @@ def test_weekly_schedule_only_trades_on_the_chosen_weekday():
     raw = pd.DataFrame({"A": np.linspace(0.1, 0.9, 14)}, index=idx)
     held = apply_rebalance_schedule(raw, cfg)["A"]
     assert held.nunique() == 2  # two Mondays in the window
+
+
+def test_band_never_leaves_gross_above_the_cap():
+    idx = pd.date_range("2020-01-06", periods=30, freq="D")
+    cfg = StrategyConfig(assets=("A", "B"), rebalance_weekday=0, no_trade_band=0.05,
+                         max_gross=1.0)
+    raw = pd.DataFrame({"A": np.linspace(0.2, 0.9, 30),
+                        "B": np.linspace(0.9, 0.2, 30)}, index=idx)
+    held = apply_rebalance_schedule(raw, cfg)
+    assert held.sum(axis=1).max() <= cfg.max_gross + 1e-12
