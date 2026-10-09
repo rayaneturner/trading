@@ -40,6 +40,7 @@ class H4Config:
     break_lookback: int = 24         # LTF bars after the break to wait for a trigger
     require_close_below: bool = False # True: the break needs a CLOSE under the low
     confirm: str = "both"            # "reject" | "engulf" | "both"
+    side: str = "both"               # "long" | "short" | "both"
     max_hold_bars: int = 288         # abandon a trade that neither wins nor loses
     fee_per_side: float = 0.0007     # crypto futures at high leverage
     max_fee_fraction_of_r: float = 1.0   # 1.0 = no filter; the backtest reports it
@@ -51,6 +52,30 @@ class H4Config:
     # in the backtest. Both bodies now have to be real.
     engulf_min_body_frac: float = 0.50   # of the confirming bar's own range
     engulf_prev_body_frac: float = 0.10  # of the previous bar's range
+
+
+def confirms(bars: pd.DataFrame, i: int, direction: str, cfg: H4Config) -> str | None:
+    """A rejection or an engulfing bar in `direction`, as the author describes them."""
+    if direction == "long":
+        return confirms_long(bars, i, cfg)
+    o, h, l, c = (float(bars[k].iloc[i]) for k in ("open", "high", "low", "close"))
+    po, pc = float(bars["open"].iloc[i - 1]), float(bars["close"].iloc[i - 1])
+    rng = h - l
+    if rng <= 0:
+        return None
+    if cfg.confirm in ("reject", "both"):
+        upper_wick = h - max(o, c)
+        if upper_wick >= cfg.pin_wick_frac * rng and c <= h - cfg.pin_close_frac * rng:
+            return "rejection"
+    if cfg.confirm in ("engulf", "both"):
+        ph, pl = float(bars["high"].iloc[i - 1]), float(bars["low"].iloc[i - 1])
+        prev_rng, prev_body = ph - pl, abs(pc - po)
+        real_prev = prev_rng > 0 and prev_body >= cfg.engulf_prev_body_frac * prev_rng
+        real_body = abs(c - o) >= cfg.engulf_min_body_frac * rng
+        if (c < o and real_prev and real_body
+                and c <= min(po, pc) and o >= max(po, pc)):
+            return "engulfing"
+    return None
 
 
 def confirms_long(bars: pd.DataFrame, i: int, cfg: H4Config) -> str | None:
@@ -93,16 +118,20 @@ class Trade:
     stop_pct: float = 0.0
     confirm: str = ""
     h4_low: float = 0.0
+    side: str = "long"
 
 
 def backtest(htf: pd.DataFrame, ltf: pd.DataFrame,
              cfg: H4Config = H4Config()) -> list:
     """Walk the lower timeframe once, in order, and record every trade.
 
+    Both directions: a break of the H4 LOW is a long setup, a break of its HIGH
+    a short one. The first version only took longs, which halved the sample and
+    left the symmetric half of the author's rule untested.
+
     Rules of the simulation, all conservative:
 
       - an H4 candle's level is only usable AFTER that candle has closed
-      - the break must happen while the level is the most recent one
       - when a bar touches both the stop and the target, the STOP is taken;
         intrabar order is unknowable and assuming otherwise flatters the result
       - one position at a time, and the entry costs the fee on both sides
@@ -110,75 +139,79 @@ def backtest(htf: pd.DataFrame, ltf: pd.DataFrame,
     h_high, h_low = htf["high"].to_numpy(), htf["low"].to_numpy()
     l_open, l_high, l_low, l_close = (ltf[k].to_numpy()
                                       for k in ("open", "high", "low", "close"))
-    # The latest CLOSED H4 candle at each LTF bar. Indexing with ffill on the
-    # H4 open stamps picks the candle still FORMING, whose low is the minimum of
-    # the LTF bars inside it — including the current one. The break condition
-    # l_low[i] < level is then false by construction and the rule never fires.
-    # A candle stamped 08:00 is only usable from 12:00.
     h_step = (htf.index[1] - htf.index[0] if len(htf) > 1
               else pd.Timedelta(hours=4))
-    h_close_times = htf.index + h_step
-    h_idx = np.searchsorted(h_close_times, ltf.index, side="right") - 1
+    h_idx = np.searchsorted(htf.index + h_step, ltf.index, side="right") - 1
 
+    sides = (("long", "short") if cfg.side == "both" else (cfg.side,))
     trades: list = []
     i, n = 1, len(ltf)
     while i < n:
         k = h_idx[i]
-        if k < 0:        # no H4 candle has closed yet
-            i += 1
-            continue
-        level = h_low[k]                       # the H4 low being broken
-        broke = l_low[i] < level
-        if cfg.require_close_below:
-            broke = broke and l_close[i] < level
-        if not broke:
+        if k < 0:
             i += 1
             continue
 
-        # a break: look forward for the confirming bar
         hit = None
-        for j in range(i + 1, min(i + cfg.break_lookback, n)):
-            why = confirms_long(ltf, j, cfg)
-            if why:
-                hit = (j, why)
+        for direction in sides:
+            level = h_low[k] if direction == "long" else h_high[k]
+            broke = (l_low[i] < level) if direction == "long" else (l_high[i] > level)
+            if cfg.require_close_below:
+                broke = broke and ((l_close[i] < level) if direction == "long"
+                                   else (l_close[i] > level))
+            if not broke:
+                continue
+            for j in range(i + 1, min(i + cfg.break_lookback, n)):
+                why = confirms(ltf, j, direction, cfg)
+                if why:
+                    hit = (j, why, direction, level)
+                    break
+            if hit:
                 break
         if hit is None:
             i += 1
             continue
-        j, why = hit
+        j, why, direction, level = hit
 
         entry = float(l_close[j])
         pad = cfg.stop_buffer_frac * max(l_high[j] - l_low[j], 1e-12)
-        stop = float(l_low[j] - pad)
-        risk = entry - stop
+        stop = float(l_low[j] - pad) if direction == "long" else float(l_high[j] + pad)
+        risk = abs(entry - stop)
         if risk <= 0:
             i = j + 1
             continue
-        target = entry + cfg.rr * risk
+        target = (entry + cfg.rr * risk) if direction == "long" else (entry - cfg.rr * risk)
         fee_r = (2 * cfg.fee_per_side * entry) / risk
 
         tr = Trade(entered=ltf.index[j], entry=entry, stop=stop, target=target,
                    fees_in_r=fee_r, stop_pct=risk / entry, confirm=why,
                    h4_low=float(level))
-        # resolve it bar by bar, stop first on an ambiguous bar
+        tr.side = direction
         end = min(j + 1 + cfg.max_hold_bars, n)
         for m in range(j + 1, end):
-            if l_low[m] <= stop:
-                tr.exited, tr.exit_price = ltf.index[m], stop
-                tr.outcome, tr.r_gross = "loss", -1.0
-                break
-            if l_high[m] >= target:
-                tr.exited, tr.exit_price = ltf.index[m], target
-                tr.outcome, tr.r_gross = "win", cfg.rr
-                break
+            if direction == "long":
+                if l_low[m] <= stop:
+                    tr.exited, tr.exit_price, tr.outcome, tr.r_gross = ltf.index[m], stop, "loss", -1.0
+                    break
+                if l_high[m] >= target:
+                    tr.exited, tr.exit_price, tr.outcome, tr.r_gross = ltf.index[m], target, "win", cfg.rr
+                    break
+            else:
+                if l_high[m] >= stop:
+                    tr.exited, tr.exit_price, tr.outcome, tr.r_gross = ltf.index[m], stop, "loss", -1.0
+                    break
+                if l_low[m] <= target:
+                    tr.exited, tr.exit_price, tr.outcome, tr.r_gross = ltf.index[m], target, "win", cfg.rr
+                    break
         else:
             m = end - 1
             tr.exited, tr.exit_price = ltf.index[m], float(l_close[m])
             tr.outcome = "timeout"
-            tr.r_gross = (tr.exit_price - entry) / risk
+            tr.r_gross = ((tr.exit_price - entry) if direction == "long"
+                          else (entry - tr.exit_price)) / risk
         tr.r_net = tr.r_gross - fee_r
         trades.append(tr)
-        i = m + 1                              # no overlapping positions
+        i = m + 1
     return trades
 
 
