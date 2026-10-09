@@ -128,33 +128,50 @@ def swing_lows(bars: pd.DataFrame, k: int) -> np.ndarray:
     return np.array(out, dtype=int)
 
 
-def find_fvg(bars: pd.DataFrame, start: int, end: int, direction: str,
-             min_points: float, pick: str = "first") -> tuple | None:
-    """A 3-bar imbalance inside [start, end], in `direction`.
+def find_fvgs(bars: pd.DataFrame, start: int, end: int, direction: str,
+              min_points: float) -> list:
+    """Every 3-bar imbalance inside [start, end], in `direction`, oldest first.
 
     Bullish gap: bar i's low sits above bar i-2's high — price left a void going
     up. Bearish gap: bar i's high sits below bar i-2's low.
 
-    `pick` decides which gap when the leg left several. "first" is the default
-    because the author places the zone "toward the first wick broken", i.e. at
-    the origin of the displacement rather than at its end: that gap is the one
-    price has to travel back to, and it is what makes the stop sit behind the
-    swept level instead of inside the move.
+    All of them, because the leg usually leaves several and the first one is not
+    always the one still in play. The caller decides which survives.
     """
     high, low = bars["high"].to_numpy(), bars["low"].to_numpy()
-    found = None
+    out = []
     for i in range(max(start, 2), min(end, len(bars) - 1) + 1):
-        gap = None
         if direction == "long" and low[i] - high[i - 2] >= min_points:
-            gap = (float(high[i - 2]), float(low[i]), i)
+            out.append((float(high[i - 2]), float(low[i]), i))
         elif direction == "short" and low[i - 2] - high[i] >= min_points:
-            gap = (float(high[i]), float(low[i - 2]), i)
-        if gap is None:
-            continue
-        if pick == "first":
-            return gap
-        found = gap
-    return found
+            out.append((float(high[i]), float(low[i - 2]), i))
+    return out
+
+
+def find_fvg(bars: pd.DataFrame, start: int, end: int, direction: str,
+             min_points: float, pick: str = "first") -> tuple | None:
+    """The first (or last) gap in the window. Kept for callers that want one."""
+    gaps = find_fvgs(bars, start, end, direction, min_points)
+    if not gaps:
+        return None
+    return gaps[0] if pick == "first" else gaps[-1]
+
+
+def gap_is_dead(bars: pd.DataFrame, gap: tuple, direction: str) -> bool:
+    """Has price CLOSED through the zone, against the trade?
+
+    Entering the zone does not kill it. The author's own sequence is a first
+    poke into the gap — the fake — then a return to it that confirms, so
+    treating any touch as invalidation discards the setup it is meant to find.
+    What kills the zone is a close beyond its far edge: a bullish gap is
+    support until a bar closes below it, a bearish gap resistance until a bar
+    closes above it.
+    """
+    g_low, g_high, g_idx = gap
+    after = bars["close"].to_numpy()[g_idx + 1:]
+    if not len(after):
+        return False
+    return bool((after < g_low).any() if direction == "long" else (after > g_high).any())
 
 
 def is_confirming(bars: pd.DataFrame, i: int, direction: str) -> str | None:
@@ -315,10 +332,20 @@ f"{cfg.mss_max_age} bars of the sweep"))
             if window.size < 3:
                 note(direction, 4, "structure window too short to hold a 3-bar gap")
                 continue
-            gap = find_fvg(entry_bars, int(window[0]), int(window[-1]), direction,
-                           cfg.fvg_min_points)
-            if gap is None:
+            gaps = find_fvgs(entry_bars, int(window[0]), int(window[-1]), direction,
+                             cfg.fvg_min_points)
+            if not gaps:
                 note(direction, 5, f"no {cfg.fvg_min_points:g}-point gap in the shifting leg")
+                continue
+            # Oldest first, nearest the origin of the move, which is where the
+            # author places the zone. A gap price has CLOSED through is dead and
+            # the next one is tried; a gap merely poked into is still live.
+            gap = next((g for g in gaps
+                        if e_last - g[2] <= cfg.fvg_max_age
+                        and not gap_is_dead(entry_bars, g, direction)), None)
+            if gap is None:
+                note(direction, 6,
+                     f"all {len(gaps)} gap(s) in the leg are stale or closed through")
                 continue
             g_low, g_high, g_idx = gap
             if e_last - g_idx > cfg.fvg_max_age:
@@ -335,10 +362,9 @@ f"limit {cfg.fvg_max_age}"))
                 # the side it would travel back from. This is the same trade the
                 # author places as a limit; it just does not need anything
                 # watching the minute price arrives, because the venue fills it.
-                if touched:
-                    note(direction, 7, (f"the {g_low:,.1f}-{g_high:,.1f} gap has already "
-                                        f"been traded into, nothing to rest against"))
-                    continue
+                # A gap already poked into is still valid: that poke is the
+                # fake the author describes, and the trade is the RETURN to the
+                # zone. Only a close through it ends the setup, filtered above.
                 away = ((e_close[e_last] > g_high) if direction == "long"
                         else (e_close[e_last] < g_low))
                 if not away:
@@ -348,7 +374,9 @@ f"limit {cfg.fvg_max_age}"))
                 if cfg.entry_mode == "stop":
                     note(direction, 9, "a resting order is a limit entry, and those are off")
                     continue
-                entry_type, confirm, retest = "limit", "pending retrace", False
+                entry_type = "limit"
+                confirm = "pending retest" if touched else "pending first touch"
+                retest = touched
                 entry = float({"near": g_high if direction == "long" else g_low,
                                "far": g_low if direction == "long" else g_high,
                                "mid": (g_low + g_high) / 2}[cfg.fill_at])

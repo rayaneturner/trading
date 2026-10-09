@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.piff import (PiffConfig, find_fvg, generate, is_confirming, swing_highs,
-                      swing_lows)
+from src.piff import (PiffConfig, find_fvg, find_fvgs, gap_is_dead, generate,
+                      is_confirming, swing_highs, swing_lows)
 
 
 def frame(rows, start="2026-03-26 14:00", freq="1min"):
@@ -247,12 +247,32 @@ def test_pending_mode_arms_an_order_before_price_returns():
     assert "awaiting the retrace" in " ".join(sig.reasons)
 
 
-def test_pending_mode_refuses_a_gap_price_has_already_traded_into():
-    """Once the gap is touched there is nothing left to rest against."""
-    entry = _piff_short_setup()          # price is in the zone on the last bar
-    sig = generate(entry, _structure(entry), None, _cfg(), pending=True)
-    assert sig.action == "flat"
-    assert any("already" in w for w in sig.trace.values())
+def test_a_gap_already_poked_into_is_still_live():
+    """The fake. The author's sequence is a first poke, then the return.
+
+    Treating any touch as invalidation threw away the setup the rule exists to
+    find, which is the retest after the fake.
+    """
+    bars = frame([[10, 12, 9, 11], [13, 20, 12, 19], [21, 24, 18, 23],
+                  [23, 24, 17, 22],        # pokes into the 12-18 gap
+                  [22, 23, 19, 22]])       # back above it
+    gap = find_fvg(bars, 0, 2, "long", min_points=2.0)
+    assert gap == (12.0, 18.0, 2)
+    assert not gap_is_dead(bars, gap, "long")
+
+
+def test_a_gap_closed_through_is_dead():
+    """A bullish gap is support until a bar CLOSES below it."""
+    bars = frame([[10, 12, 9, 11], [13, 20, 12, 19], [21, 24, 18, 23],
+                  [23, 24, 10, 11]])       # closes under the gap's low
+    gap = find_fvg(bars, 0, 2, "long", min_points=2.0)
+    assert gap_is_dead(bars, gap, "long")
+
+
+def test_a_dead_gap_is_skipped_for_the_next_live_one():
+    """The leg leaves several gaps; the first is not always the one in play."""
+    bars = frame([[10, 12, 9, 11], [13, 20, 12, 19], [21, 24, 18, 23]])
+    assert len(find_fvgs(bars, 0, 2, "long", min_points=2.0)) == 1
 
 
 def test_the_two_modes_disagree_by_design_on_the_same_bars():
