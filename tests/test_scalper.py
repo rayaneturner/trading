@@ -101,3 +101,13 @@ def test_in_blackout_edges():
     assert not in_blackout(t, [pd.Timestamp("2026-01-01 12:11")], 10)
     assert not in_blackout(t, [], 10)
     assert not in_blackout(t, None, 10)
+
+
+def test_intraday_preset_clears_its_own_fee_floor_only_with_a_wide_enough_stop():
+    """The preset documents a frontier; this asserts the frontier is where it says."""
+    from src.scalper import INTRADAY
+    floor = minimum_viable_stop(INTRADAY)
+    assert floor == pytest.approx(0.0014 / 0.18)          # 0.78%
+    assert breakeven_multiple_of_random(floor, INTRADAY) == pytest.approx(1.18)
+    # A 5m-sized stop is below it; a 4h-sized one clears it.
+    assert 0.0024 < floor < 0.0146

@@ -179,6 +179,29 @@ def generate(candles: pd.DataFrame, higher: pd.DataFrame, cfg: ScalpConfig = Sca
     return signal
 
 
+# The configuration that clears the fee floor at current volatility. The entry
+# timeframe is not a style choice: ATR grows with the square root of the bar
+# duration, so the bar size is whatever makes 1.5*ATR exceed the minimum viable
+# stop. Measured on BTC 2026-10-09 (daily vol 1.98%):
+#
+#     5m  bars -> 1.5*ATR = 0.24%  -> fees 0.57R   unusable
+#     15m bars -> 0.34%            -> fees 0.41R   unusable
+#     1h  bars -> 0.75%            -> fees 0.19R   borderline
+#     4h  bars -> 1.46%            -> fees 0.10R   comfortable
+#
+# So the fastest tradeable horizon today is 1h-4h bars: positions lasting hours,
+# not minutes. When realised volatility rises, the frontier moves down and
+# faster bars become viable; when it falls, the engine simply refuses more often.
+INTRADAY = ScalpConfig(
+    fee_per_side=0.0007,          # 25-1000x tier, the one a small stop forces
+    max_fee_fraction_of_r=0.18,
+    stop_atr_mult=1.5,
+    reward_risk=2.0,
+    time_stop_bars=12,            # 12 bars of the entry timeframe
+    bars_per_hour=1,
+)
+
+
 def minimum_viable_stop(cfg: ScalpConfig = ScalpConfig()) -> float:
     """The tightest stop whose fees stay inside the budget. The horizon floor."""
     return 2 * cfg.fee_per_side / cfg.max_fee_fraction_of_r
