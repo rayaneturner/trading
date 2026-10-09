@@ -66,6 +66,14 @@ class PiffConfig:
 
     # --- acceptance ---
     min_rr: float = 3.0
+    # When the break takes the session's own extreme there is no pool left
+    # beyond it to aim at, and a structural target cannot be named. The author
+    # trades through that case — the logged winner targeted 294 points on a
+    # 48-point stop, a level that is no swing of the session — so rather than
+    # refuse the setup the target falls back to this multiple of the stop. It is
+    # marked as synthetic in the reasons, because it is a choice and not a level
+    # the market put there. Set to 0 to refuse instead.
+    fallback_rr: float = 4.0
     fee_per_side: float = 0.0001     # MoonX indices, fraction of notional
     max_fee_fraction_of_r: float = 0.40
 
@@ -443,11 +451,18 @@ f"limit {cfg.fvg_max_age}"))
             ahead = [p for p in pools if p < s_idx
                      and ((s_high[p] > opp_level) if direction == "long"
                           else (s_low[p] < opp_level))]
-            if not ahead:
+            if ahead:
+                target = float(s_high[ahead[-1]] if direction == "long"
+                               else s_low[ahead[-1]])
+                target_kind = "pool"
+            elif cfg.fallback_rr > 0:
+                target = float(entry + cfg.fallback_rr * stop_points if direction == "long"
+                               else entry - cfg.fallback_rr * stop_points)
+                target_kind = "synthetic"
+            else:
                 note(direction, 11, (f"no liquidity pool beyond the {opp_level:,.1f} "
                                      f"structure level to target"))
                 continue
-            target = float(s_high[ahead[-1]] if direction == "long" else s_low[ahead[-1]])
             if (target <= entry) if direction == "long" else (target >= entry):
                 note(direction, 12, (f"the target at {target:,.1f} sits the wrong side "
 f"of the entry"))
@@ -465,7 +480,10 @@ f"of the entry"))
                          f"gap {g_low:,.1f}-{g_high:,.1f}"
                          + (" awaiting the retrace" if pending else
                             " retested" if retest else " on first touch"),
-                         f"entry {entry_type} on a {confirm}"],
+                         f"entry {entry_type} on a {confirm}",
+                         f"target is a {target_kind}"
+                         + (f" {cfg.fallback_rr:g}R extension, no pool beyond "
+                            f"{opp_level:,.1f}" if target_kind == "synthetic" else "")],
             )
             if rr < cfg.min_rr:
                 candidate.rejected.append(f"R:R {rr:.2f} below the {cfg.min_rr} minimum")

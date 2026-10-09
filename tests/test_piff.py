@@ -314,3 +314,29 @@ def test_the_target_sits_beyond_the_structure_level_not_on_it():
     # the shift was called on the swing low at 22,980; the target must be beyond it
     assert sig.target < 22980.0
     assert sig.rr > 1.0
+
+
+def test_a_break_through_the_session_extreme_still_gets_a_target():
+    """No pool beyond the break level is the normal case when the break takes
+    the session's own low, and refusing there threw away valid setups."""
+    entry = _piff_short_setup()
+    # Strip the earlier 22,950 leg, so nothing sits beyond the 22,980 level.
+    stripped = entry.iloc[10:]
+    sig = generate(stripped, _structure(stripped), None, _cfg())
+    assert sig.action == "short"
+    assert round(sig.rr, 2) == 4.0
+    assert any("synthetic" in r for r in sig.reasons)
+
+
+def test_the_synthetic_target_can_be_switched_off():
+    entry = _piff_short_setup().iloc[10:]
+    sig = generate(entry, _structure(entry), None, _cfg(fallback_rr=0.0))
+    assert sig.action == "flat"
+    assert any("no liquidity pool beyond" in w for w in sig.trace.values())
+
+
+def test_a_real_pool_still_wins_over_the_synthetic_one():
+    entry = _piff_short_setup()
+    sig = generate(entry, _structure(entry), None, _cfg())
+    assert sig.target == 22950.0
+    assert any("pool" in r and "synthetic" not in r for r in sig.reasons)
