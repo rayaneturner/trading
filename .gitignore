@@ -4,3 +4,5 @@ __pycache__/
 .env
 out/
 *.log
+
+# les series de recherche sont versionnees compressees sous data/crypto/
