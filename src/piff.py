@@ -39,7 +39,12 @@ import pandas as pd
 @dataclass(frozen=True)
 class PiffConfig:
     # --- structure ---
-    swing_k: int = 2                 # fractal half-width: a swing is the extreme of 2k+1 bars
+    # Fractal half-width: a swing is the extreme of 2k+1 bars. k=1 on the
+    # structure timeframe, not 2, because a swing is only confirmed k bars after
+    # it prints: with k=2 on M5 a high made at 14:05 is not a swing until 14:20,
+    # and the engine cannot see the level it needs to call the structure break
+    # until the move is already over. k=1 sees it one bar later.
+    swing_k: int = 1
     # Both lookbacks have to cover the same wall-clock span. They are counted
     # in DIFFERENT units — sweeps in structure bars, gaps in entry bars — so
     # leaving them unrelated made every gap stale before price could return to

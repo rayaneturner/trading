@@ -77,13 +77,16 @@ def resample(bars: pd.DataFrame, rule: str) -> pd.DataFrame:
          "volume": "sum"}).dropna()
 
 
-def signal_from_m1(m1: pd.DataFrame, structure_rule: str = "15min",
+def signal_from_m1(m1: pd.DataFrame, structure_rule: str = "5min",
                    htf: pd.DataFrame | None = None,
                    cfg: PiffConfig = PiffConfig()) -> PiffSignal:
     """The decision, from one M1 series plus an optional higher-timeframe frame.
 
     The structure frame is derived, not downloaded: the sweep and the shift then
     describe the same prices the M1 gap was found in.
+
+    M5 is the default because that is the timeframe the author reads structure
+    breaks on. The higher timeframe (M15 to H1) supplies the bias only.
     """
     structure = resample(m1, structure_rule)
     if htf is None:

@@ -19,7 +19,7 @@ def main() -> None:
     ap.add_argument("--m1", required=True, help="M1 candle payload (the FVG timeframe)")
     ap.add_argument("--htf", help="higher-timeframe payload for the bias")
     ap.add_argument("--htf-interval", default="15m")
-    ap.add_argument("--structure", default="15min", help="pandas rule for the structure frame")
+    ap.add_argument("--structure", default="5min", help="pandas rule for the structure frame")
     ap.add_argument("--entry-mode", default="both", choices=["limit", "stop", "both"])
     ap.add_argument("--min-rr", type=float, default=3.0)
     ap.add_argument("--no-session", action="store_true", help="ignore the session window")
