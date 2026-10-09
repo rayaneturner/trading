@@ -8,7 +8,8 @@ same mistake cannot pass again.
 import pytest
 
 from src.piff import PiffSignal
-from src.piff_moonx import (MIN_LOTS, lots_for_risk, plan_trade, point_value)
+from src.piff_moonx import (LOT_STEP, MIN_LOTS, lots_for_risk, plan_trade,
+                            point_value)
 
 
 def test_point_value_matches_the_two_executed_round_trips():
@@ -55,12 +56,21 @@ def test_a_stop_beyond_what_equity_absorbs_is_refused():
 def test_sizing_from_a_risk_fraction_rounds_down():
     """Rounding up would quietly exceed the risk the caller set."""
     lots = lots_for_risk(19.07 * 0.01, 25.5)
-    assert lots == pytest.approx(0.002, abs=1e-9)
     assert point_value(lots) * 25.5 <= 19.07 * 0.01
+    # and it is the largest step that still fits
+    assert point_value(lots + LOT_STEP) * 25.5 > 19.07 * 0.01
+
+
+def test_sizing_a_two_dollar_risk_across_the_logged_stops():
+    """The rule the author set: 2 USD per trade, whatever the stop width."""
+    for stop in (16.6, 21.8, 29.3, 44.8):
+        lots = lots_for_risk(2.0, stop)
+        assert point_value(lots) * stop == pytest.approx(2.0, abs=0.01)
 
 
 def test_a_risk_too_small_for_the_lot_floor_is_named_as_such():
-    plan = plan_trade(_short(), equity=19.07, risk_fraction=0.0001)
+    """The floor is 0.000001 lot, so it takes a truly tiny risk to hit it."""
+    plan = plan_trade(_short(), equity=19.07, risk_fraction=1e-9)
     assert not plan.ok
     assert any("below the" in r and "minimum" in r for r in plan.refusals)
 

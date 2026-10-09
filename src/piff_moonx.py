@@ -26,8 +26,12 @@ from .piff import PiffSignal
 
 POINT_VALUE_PER_LOT = 3.5      # USD per index point, per lot (contractSize)
 FEE_PER_SIDE = 0.0001          # fraction of notional, measured
-MIN_LOTS = 0.001               # measured: this size filled
-LOT_STEP = 0.001
+# Measured again, lower: a 0.000001-lot order filled and settled (notional
+# 0.108 USD, zero fee, auto-closed on its take profit). My earlier 0.001 floor
+# was another assumption dressed as a measurement — it was simply the smallest
+# size I had happened to send.
+MIN_LOTS = 0.000001
+LOT_STEP = 0.000001
 APPLIED_LEVERAGE = 500         # the venue applies its own, ignoring a request
 
 
