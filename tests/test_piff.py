@@ -221,3 +221,48 @@ def test_no_lookahead_future_bars_do_not_change_the_past_decision():
     extended = pd.concat([entry, future])
     cut = extended.iloc[:len(entry)]
     assert generate(cut, _structure(cut), None, _cfg()).to_dict() == now.to_dict()
+
+
+# --- resting orders -------------------------------------------------------
+
+def _piff_armed_setup():
+    """The same sequence, cut BEFORE price returns to the gap.
+
+    Dropping the last five bars of the full fixture leaves the sweep, the shift
+    and the M1 gap in place while price is still below the zone, which is
+    exactly the state a resting order is for.
+    """
+    return _piff_short_setup().iloc[:-5]
+
+
+def test_pending_mode_arms_an_order_before_price_returns():
+    entry = _piff_armed_setup()
+    sig = generate(entry, _structure(entry), None, _cfg(), pending=True)
+
+    assert sig.action == "short"
+    assert sig.entry_type == "limit"
+    assert sig.entry == 23040.0          # rests at the far edge of the gap
+    assert sig.stop == 23062.0           # behind the swept high
+    assert sig.target == 22980.0
+    assert "awaiting the retrace" in " ".join(sig.reasons)
+
+
+def test_pending_mode_refuses_a_gap_price_has_already_traded_into():
+    """Once the gap is touched there is nothing left to rest against."""
+    entry = _piff_short_setup()          # price is in the zone on the last bar
+    sig = generate(entry, _structure(entry), None, _cfg(), pending=True)
+    assert sig.action == "flat"
+    assert any("already" in w for w in sig.trace.values())
+
+
+def test_the_two_modes_disagree_by_design_on_the_same_bars():
+    """Immediate mode needs a confirming bar in the zone; pending mode forbids it."""
+    armed = _piff_armed_setup()
+    assert generate(armed, _structure(armed), None, _cfg()).action == "flat"
+    assert generate(armed, _structure(armed), None, _cfg(), pending=True).action == "short"
+
+
+def test_pending_mode_is_off_when_only_stop_entries_are_allowed():
+    entry = _piff_armed_setup()
+    sig = generate(entry, _structure(entry), None, _cfg(entry_mode="stop"), pending=True)
+    assert sig.action == "flat"

@@ -189,7 +189,8 @@ def _htf_bias(htf: pd.DataFrame, cfg: PiffConfig) -> str:
 
 
 def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
-             htf: pd.DataFrame | None = None, cfg: PiffConfig = PiffConfig()) -> PiffSignal:
+             htf: pd.DataFrame | None = None, cfg: PiffConfig = PiffConfig(),
+             pending: bool = False) -> PiffSignal:
     """One decision, from three timeframes, exactly as the author reads them.
 
     `structure_bars` (M10-M15) carries the sweep and the structure shift.
@@ -199,6 +200,14 @@ def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
     Searching the gap on M1 inside the window the structure leg spans is the
     whole point: the shift says where and which way, the M1 gap says at what
     price, and the test of that gap is what triggers.
+
+    `pending` switches what counts as tradeable. By default the current bar has
+    to be inside the gap and confirming — a decision for right now, which is
+    only correct if something reads every bar. With `pending=True` the sequence
+    has to be complete while price has NOT yet returned to the gap, and the
+    signal describes an order to leave resting at the gap edge. It is the same
+    trade, placed the way the author's logged "Limit" entries were, and it does
+    not need anything watching the minute price arrives.
     """
     rejected: list = []
     # The furthest stage each direction reached, so a refusal is diagnostic.
@@ -307,24 +316,54 @@ f"{cfg.mss_max_age} bars of the sweep"))
 f"limit {cfg.fvg_max_age}"))
                 continue
 
-            # Price has to be IN the gap right now — by its wick, not its close.
-            # A bar that reaches into the zone and closes back out of it is the
-            # rejection the setup is waiting for: requiring the close inside
-            # would throw away exactly the hammer the author enters on.
-            if not (e_low[e_last] <= g_high and e_high[e_last] >= g_low):
-                note(direction, 5, (f"price is at {e_close[e_last]:,.1f}, not touching "
-f"the {g_low:,.1f}-{g_high:,.1f} gap"))
-                continue
-            # Whether an earlier bar already reached the zone decides which of
-            # the author's two entries this is, and what the stop leans on.
-            retest = bool(np.any((e_low[g_idx + 1:e_last] <= g_high)
-                                 & (e_high[g_idx + 1:e_last] >= g_low)))
+            touched = bool(np.any((e_low[g_idx + 1:] <= g_high)
+                                  & (e_high[g_idx + 1:] >= g_low)))
+            entry_type = entry = anchor = None
+            if pending:
+                # An order to leave resting. The gap has to be UNTOUCHED, so the
+                # order has something to fill against, and price has to sit on
+                # the side it would travel back from. This is the same trade the
+                # author places as a limit; it just does not need anything
+                # watching the minute price arrives, because the venue fills it.
+                if touched:
+                    note(direction, 7, (f"the {g_low:,.1f}-{g_high:,.1f} gap has already "
+                                        f"been traded into, nothing to rest against"))
+                    continue
+                away = ((e_close[e_last] > g_high) if direction == "long"
+                        else (e_close[e_last] < g_low))
+                if not away:
+                    note(direction, 7, (f"price at {e_close[e_last]:,.1f} is not on the far "
+                                        f"side of the {g_low:,.1f}-{g_high:,.1f} gap"))
+                    continue
+                if cfg.entry_mode == "stop":
+                    note(direction, 9, "a resting order is a limit entry, and those are off")
+                    continue
+                entry_type, confirm, retest = "limit", "pending retrace", False
+                entry = float({"near": g_high if direction == "long" else g_low,
+                               "far": g_low if direction == "long" else g_high,
+                               "mid": (g_low + g_high) / 2}[cfg.fill_at])
+                anchor = swept
+            else:
+                # Price has to be IN the gap right now — by its wick, not its
+                # close. A bar that reaches into the zone and closes back out of
+                # it is the rejection the setup waits for: requiring the close
+                # inside would discard exactly the hammer the author enters on.
+                if not (e_low[e_last] <= g_high and e_high[e_last] >= g_low):
+                    note(direction, 7, (f"price is at {e_close[e_last]:,.1f}, not touching "
+                                        f"the {g_low:,.1f}-{g_high:,.1f} gap"))
+                    continue
+                # Whether an earlier bar already reached the zone decides which
+                # of the author's two entries this is, and what the stop leans on.
+                retest = bool(np.any((e_low[g_idx + 1:e_last] <= g_high)
+                                     & (e_high[g_idx + 1:e_last] >= g_low)))
+                confirm = is_confirming(entry_bars, e_last, direction)
+                if not confirm:
+                    note(direction, 8, "touching the gap but the current bar does not confirm")
+                    continue
 
-            confirm = is_confirming(entry_bars, e_last, direction)
-            if not confirm:
-                note(direction, 5, "touching the gap but the current bar does not confirm")
-                continue
-            if retest and cfg.entry_mode in ("stop", "both"):
+            if entry_type is not None:
+                pass
+            elif retest and cfg.entry_mode in ("stop", "both"):
                 # The usual case: a first poke, then a retest that confirms.
                 # Entry triggers on the break of the confirming bar and the stop
                 # leans on it — the tight stops in the log.
@@ -373,7 +412,8 @@ f"of the entry"))
                 reasons=[f"swept the {'low' if direction == 'long' else 'high'} at {swept:,.1f}",
                          f"structure shifted on {structure_bars.index[mss]}",
                          f"gap {g_low:,.1f}-{g_high:,.1f}"
-                         + (" retested" if retest else " on first touch"),
+                         + (" awaiting the retrace" if pending else
+                            " retested" if retest else " on first touch"),
                          f"entry {entry_type} on a {confirm}"],
             )
             if rr < cfg.min_rr:
