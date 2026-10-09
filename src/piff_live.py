@@ -71,10 +71,28 @@ def parse_candles(payload: dict | str, expect_interval: str | None = None,
     return frame
 
 
-def resample(bars: pd.DataFrame, rule: str) -> pd.DataFrame:
-    return bars.resample(rule, label="left", closed="left").agg(
+def resample(bars: pd.DataFrame, rule: str, drop_partial: bool = True) -> pd.DataFrame:
+    """Aggregate to `rule`, dropping the final bar when it is still forming.
+
+    This is not a nicety. A structure break is a CLOSE beyond a level, and the
+    close of a bar that has not ended yet is just the last trade in it. Read
+    live, the M5 bar stamped 14:30 showed 30,863.3 at 14:30 and 30,851.8 at
+    14:32 — above a 30,855.4 break level and then below it. Evaluating that bar
+    makes the signal repaint: it appears, then vanishes, and a trade taken on
+    the first reading was taken on a structure break that never happened.
+
+    The bar is complete only once the input covers its whole span, which for M1
+    input means the last bar's minute is the period's final minute.
+    """
+    out = bars.resample(rule, label="left", closed="left").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last",
          "volume": "sum"}).dropna()
+    if drop_partial and len(out):
+        step = bars.index[1] - bars.index[0] if len(bars) > 1 else pd.Timedelta(minutes=1)
+        period = pd.tseries.frequencies.to_offset(rule)
+        if bars.index[-1] + step < out.index[-1] + period:
+            out = out.iloc[:-1]
+    return out
 
 
 def signal_from_m1(m1: pd.DataFrame, structure_rule: str = "5min",

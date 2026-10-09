@@ -89,3 +89,21 @@ def test_a_flat_series_produces_a_flat_decision_with_a_stated_reason():
     sig = signal_from_m1(m1, "15min")
     assert sig.action == "flat"
     assert sig.rejected and sig.rejected[0]
+
+
+def test_a_still_forming_structure_bar_is_dropped():
+    """The live failure: an M5 bar read mid-formation showed a close above a
+    break level, then below it two minutes later."""
+    times = [1791486000000 + 60000 * i for i in range(62)]   # 14:00 .. 15:01
+    m1 = parse_candles(payload(times, interval="1m"), min_bars=62)
+    full = resample(m1, "5min", drop_partial=False)
+    cut = resample(m1, "5min")
+    assert len(full) == 13          # 12 complete bars plus the 2-minute stub
+    assert len(cut) == 12           # the stub is gone
+    assert cut.index[-1] + pd.Timedelta(minutes=5) <= m1.index[-1] + pd.Timedelta(minutes=1)
+
+
+def test_an_exactly_complete_bar_is_kept():
+    times = [1791486000000 + 60000 * i for i in range(60)]   # 14:00 .. 14:59
+    m1 = parse_candles(payload(times, interval="1m"), min_bars=60)
+    assert len(resample(m1, "5min")) == 12
