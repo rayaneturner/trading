@@ -217,7 +217,12 @@ def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
     trace: dict = {}
 
     def note(direction: str, stage: int, why: str) -> None:
-        if depth.get(direction, -1) <= stage:
+        # Strictly deeper only. Sweep candidates are tried newest first, so at
+        # an equal stage the FIRST note is the one about the most recent sweep,
+        # and that is the one worth reporting. Overwriting on equality reported
+        # the oldest sweep instead, which named a structure level hundreds of
+        # points away while the relevant one was a few points off.
+        if depth.get(direction, -1) < stage:
             depth[direction], trace[direction] = stage, why
     if len(entry_bars) < cfg.min_bars:
         return PiffSignal("flat", rejected=[
