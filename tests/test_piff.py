@@ -76,7 +76,7 @@ def _piff_short_setup():
     sb8  price trades back into the gap, pokes above it, and closes inside on a
          bearish engulfing bar — the trigger
     """
-    rows = [[23000, 23005, 22995, 23000]] * 5 + [
+    rows = [[23000, 23005, 22995, 23000]] * 20 + [
         # sb1 (5-9) an EARLIER low at 22950 — the pool the trade targets. It has
         # to exist and sit beyond the structure level, or there is nothing left
         # to aim at once the break has taken 22980.
@@ -128,11 +128,22 @@ def _piff_short_setup():
         [23034, 23042, 23032, 23036],
         [23036, 23042, 23032, 23033.5],
     ]
-    return frame(rows)
+    return frame(rows, start="2026-03-26 13:45")
 
 
 def _structure(entry):
     return entry.resample("5min").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last",
+         "volume": "sum"}).dropna()
+
+
+def _htf15(entry):
+    """The M15 frame the target is read on.
+
+    Resampled from the same M1 bars rather than fetched, so a test says in one
+    place which wick it expects the target to find.
+    """
+    return entry.resample("15min").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last",
          "volume": "sum"}).dropna()
 
@@ -146,7 +157,8 @@ def _cfg(**kw):
 
 def test_full_short_sequence_fires_on_the_confirming_bar():
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg())
+    sig = generate(entry, _structure(entry), None, _cfg(),
+                   target_bars=_htf15(entry))
 
     assert sig.action == "short"
     assert sig.entry_type == "stop"          # a confirming bar printed inside the gap
@@ -165,7 +177,8 @@ def test_full_short_sequence_fires_on_the_confirming_bar():
 def test_limit_mode_leans_on_the_swept_level_instead():
     """Same price action, the other entry the author uses: rest at the gap edge."""
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg(entry_mode="limit"))
+    sig = generate(entry, _structure(entry), None, _cfg(entry_mode="limit"),
+                   target_bars=_htf15(entry))
 
     assert sig.action == "short" and sig.entry_type == "limit"
     assert sig.entry == 23040.0              # the far edge of the gap
@@ -182,10 +195,14 @@ def test_htf_bias_vetoes_the_wrong_direction():
          "close": np.linspace(22000, 23500, 60), "volume": 1.0},
         index=pd.date_range("2026-03-24", periods=60, freq="1h"))
     cfg = _cfg(require_htf_bias=True, htf_fast=5, htf_slow=20)
-    assert generate(entry, _structure(entry), up, cfg).action == "flat"
+    # The bias frame is hourly and carries no wick to aim at; the target frame
+    # is passed separately, which is why the two are separate inputs.
+    m15 = _htf15(entry)
+    assert generate(entry, _structure(entry), up, cfg, target_bars=m15).action == "flat"
 
     down = up.assign(close=np.linspace(23500, 22000, 60))
-    assert generate(entry, _structure(entry), down, cfg).action == "short"
+    assert generate(entry, _structure(entry), down, cfg,
+                    target_bars=m15).action == "short"
 
 
 def test_flat_market_produces_nothing():
@@ -205,29 +222,32 @@ def test_session_filter_blocks_outside_hours():
 
 def test_min_rr_rejects_a_setup_that_does_not_pay_enough():
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg(min_rr=8.0))
+    sig = generate(entry, _structure(entry), None, _cfg(min_rr=8.0),
+                   target_bars=_htf15(entry))
     assert sig.action == "flat"
     assert any("R:R" in r for r in sig.rejected)
 
 
 def test_fee_budget_rejects_a_stop_too_tight_for_the_venue():
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg(max_fee_fraction_of_r=0.0001))
+    sig = generate(entry, _structure(entry), None, _cfg(max_fee_fraction_of_r=0.0001),
+                   target_bars=_htf15(entry))
     assert sig.action == "flat"
     assert any("fees" in r for r in sig.rejected)
 
 
 def test_signal_is_deterministic():
     entry = _piff_short_setup()
-    structure = _structure(entry)
-    assert generate(entry, structure, None, _cfg()).to_dict() == \
-           generate(entry, structure, None, _cfg()).to_dict()
+    structure, m15 = _structure(entry), _htf15(entry)
+    assert generate(entry, structure, None, _cfg(), target_bars=m15).to_dict() == \
+           generate(entry, structure, None, _cfg(), target_bars=m15).to_dict()
 
 
 def test_no_lookahead_future_bars_do_not_change_the_past_decision():
     """Append bars after the decision point; the decision at that point must hold."""
     entry = _piff_short_setup()
-    now = generate(entry, _structure(entry), None, _cfg())
+    now = generate(entry, _structure(entry), None, _cfg(),
+                   target_bars=_htf15(entry))
 
     future = pd.DataFrame(
         [[23033, 23035, 22900, 22905], [22905, 22910, 22850, 22860]],
@@ -236,7 +256,8 @@ def test_no_lookahead_future_bars_do_not_change_the_past_decision():
                             periods=2, freq="1min")).assign(volume=1.0)
     extended = pd.concat([entry, future])
     cut = extended.iloc[:len(entry)]
-    assert generate(cut, _structure(cut), None, _cfg()).to_dict() == now.to_dict()
+    assert generate(cut, _structure(cut), None, _cfg(),
+                    target_bars=_htf15(cut)).to_dict() == now.to_dict()
 
 
 # --- resting orders -------------------------------------------------------
@@ -253,7 +274,8 @@ def _piff_armed_setup():
 
 def test_pending_mode_arms_an_order_before_price_returns():
     entry = _piff_armed_setup()
-    sig = generate(entry, _structure(entry), None, _cfg(), pending=True)
+    sig = generate(entry, _structure(entry), None, _cfg(), pending=True,
+                   target_bars=_htf15(entry))
 
     assert sig.action == "short"
     assert sig.entry_type == "limit"
@@ -294,8 +316,11 @@ def test_a_dead_gap_is_skipped_for_the_next_live_one():
 def test_the_two_modes_disagree_by_design_on_the_same_bars():
     """Immediate mode needs a confirming bar in the zone; pending mode forbids it."""
     armed = _piff_armed_setup()
-    assert generate(armed, _structure(armed), None, _cfg()).action == "flat"
-    assert generate(armed, _structure(armed), None, _cfg(), pending=True).action == "short"
+    m15 = _htf15(armed)
+    assert generate(armed, _structure(armed), None, _cfg(),
+                    target_bars=m15).action == "flat"
+    assert generate(armed, _structure(armed), None, _cfg(), pending=True,
+                    target_bars=m15).action == "short"
 
 
 def test_pending_mode_is_off_when_only_stop_entries_are_allowed():
@@ -309,35 +334,67 @@ def test_the_target_sits_beyond_the_structure_level_not_on_it():
     the level, so a target on that level is already taken when the setup forms.
     """
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg())
+    sig = generate(entry, _structure(entry), None, _cfg(),
+                   target_bars=_htf15(entry))
     assert sig.action == "short"
     # the shift was called on the swing low at 22,980; the target must be beyond it
     assert sig.target < 22980.0
     assert sig.rr > 1.0
 
 
-def test_a_break_through_the_session_extreme_still_gets_a_target():
-    """No pool beyond the break level is the normal case when the break takes
-    the session's own low, and refusing there threw away valid setups."""
+def test_a_break_through_the_session_extreme_is_refused_by_default():
+    """The author retired the synthetic target: every target is now a level the
+    market put there, or there is no trade. This is the case that costs -- the
+    break takes the session's own low and no wick is left to aim at."""
     entry = _piff_short_setup()
     # Strip the earlier 22,950 leg, so nothing sits beyond the 22,980 level.
-    stripped = entry.iloc[10:]
-    sig = generate(stripped, _structure(stripped), None, _cfg())
+    stripped = entry.iloc[25:]
+    sig = generate(stripped, _structure(stripped), None, _cfg(),
+                   target_bars=_htf15(stripped))
+    assert sig.action == "flat"
+    assert any("no M15 wick beyond" in w for w in sig.trace.values())
+
+
+def test_the_synthetic_target_can_be_restored():
+    """Setting fallback_rr back to 4.0 brings the retired behaviour back, so the
+    cost of the author's choice stays measurable rather than unreachable."""
+    stripped = _piff_short_setup().iloc[25:]
+    sig = generate(stripped, _structure(stripped), None, _cfg(fallback_rr=4.0),
+                   target_bars=_htf15(stripped))
     assert sig.action == "short"
     assert round(sig.rr, 2) == 4.0
     assert any("synthetic" in r for r in sig.reasons)
 
 
-def test_the_synthetic_target_can_be_switched_off():
-    entry = _piff_short_setup().iloc[10:]
-    sig = generate(entry, _structure(entry), None, _cfg(fallback_rr=0.0))
+def test_the_target_is_read_on_the_m15_frame_not_the_structure_frame():
+    """The rule names the M15 wick of the previous move. An M15 wick deeper than
+    the M5 swing standing at the same place makes the two frames disagree, and
+    the number says which one the target came from.
+    """
+    entry = _piff_short_setup()
+    m15 = _htf15(entry).copy()
+    m15.loc[m15.index[1], "low"] = 22900.0
+
+    assert generate(entry, _structure(entry), None, _cfg(),
+                    target_bars=m15).target == 22900.0
+    assert generate(entry, _structure(entry), None, _cfg(target_frame="structure"),
+                    target_bars=m15).target == 22950.0
+
+
+def test_a_target_frame_too_short_to_carry_a_fractal_refuses():
+    """Two M15 bars cannot hold a k=1 swing. Silently falling back to the M5
+    swing there would report a target the named rule never chose."""
+    entry = _piff_short_setup()
+    sig = generate(entry, _structure(entry), None, _cfg(),
+                   target_bars=_htf15(entry).iloc[:2])
     assert sig.action == "flat"
-    assert any("no liquidity pool beyond" in w for w in sig.trace.values())
+    assert any("no M15 wick beyond" in w for w in sig.trace.values())
 
 
 def test_a_real_pool_still_wins_over_the_synthetic_one():
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg())
+    sig = generate(entry, _structure(entry), None, _cfg(),
+                   target_bars=_htf15(entry))
     assert sig.target == 22950.0
     assert any("pool" in r and "synthetic" not in r for r in sig.reasons)
 

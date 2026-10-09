@@ -86,9 +86,15 @@ def step(client, cfg: WatchConfig, state: WatchState,
         # places deciding how many bars are enough is one place too many.
         m1 = parse_candles(client.candles(cfg.pair, "1m", 500), "1m",
                            min_bars=cfg.strategy.min_bars)
-        htf = (parse_candles(client.candles(cfg.pair, cfg.htf_interval, 500),
-                             cfg.htf_interval, min_bars=50)
-               if cfg.use_htf_bias else None)
+        # Two different jobs, two different depths. The EMA bias needs enough
+        # history for the slow span to mean anything; the target only needs
+        # enough bars for a k-fractal to exist. Demanding 50 either way made
+        # the loop skip every pass on a short series it could have read.
+        m15 = parse_candles(client.candles(cfg.pair, cfg.htf_interval, 500),
+                            cfg.htf_interval,
+                            min_bars=50 if cfg.use_htf_bias
+                            else 2 * cfg.strategy.swing_k + 1)
+        htf = m15 if cfg.use_htf_bias else None
     except CandleDataError as exc:
         return {"action": "skipped", "why": f"candle data unusable: {exc}"}
 
@@ -103,7 +109,7 @@ def step(client, cfg: WatchConfig, state: WatchState,
     # a trade nobody decided on: the sweep it was placed for can expire, or
     # price can close through the gap, while the order sleeps at the venue.
     cancelled = []
-    if orders and generate(m1, structure, htf, cfg.strategy,
+    if orders and generate(m1, structure, htf, cfg.strategy, target_bars=m15,
                            pending=True).action == "flat":
         for o in orders:
             oid = o.get("_id") or o.get("id")
@@ -120,7 +126,8 @@ def step(client, cfg: WatchConfig, state: WatchState,
     # Immediate entry first: it carries the tighter stop and the confirmed bar.
     last = None
     for pending in (False, True) if cfg.allow_pending else (False,):
-        sig = generate(m1, structure, htf, cfg.strategy, pending=pending)
+        sig = generate(m1, structure, htf, cfg.strategy, pending=pending,
+                       target_bars=m15)
         last = sig
         if sig.action == "flat":
             continue

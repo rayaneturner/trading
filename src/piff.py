@@ -64,6 +64,14 @@ class PiffConfig:
     htf_fast: int = 20
     htf_slow: int = 50
 
+    # --- target ---
+    # Which frame's swings the target reads. "structure" takes the structure
+    # frame (M5) the sweep and the shift were read on. "htf" takes the M15
+    # frame: the author aims at "la meche de la bougie M15 du precedent
+    # mouvement", a level further out than the M5 swing standing at the same
+    # place, so the two frames do not name the same price.
+    target_frame: str = "htf"
+
     # --- acceptance ---
     min_rr: float = 3.0
     # When the break takes the session's own extreme there is no pool left
@@ -73,7 +81,13 @@ class PiffConfig:
     # refuse the setup the target falls back to this multiple of the stop. It is
     # marked as synthetic in the reasons, because it is a choice and not a level
     # the market put there. Set to 0 to refuse instead.
-    fallback_rr: float = 4.0
+    #
+    # Retired by the author: every target is now a level the market put there,
+    # or there is no trade. The cost is the case the comment above describes --
+    # a break that takes the session's own extreme leaves no wick to aim at and
+    # is now refused at stage 11, the logged 294-point winner among it. Restore
+    # it by setting this back to 4.0.
+    fallback_rr: float = 0.0
     fee_per_side: float = 0.0001     # MoonX indices, fraction of notional
     max_fee_fraction_of_r: float = 0.40
 
@@ -218,14 +232,43 @@ def _htf_bias(htf: pd.DataFrame, cfg: PiffConfig) -> str:
     return "long" if fast > slow else "short"
 
 
+def htf_pool(htf: pd.DataFrame | None, direction: str, before: pd.Timestamp,
+             beyond: float, k: int) -> float | None:
+    """The last M15 wick beyond `beyond`, left by a move that closed before
+    `before`. Returns None when the frame is missing, too short to carry a
+    fractal, or holds no such wick.
+
+    The structure frame is indexed by bar number and this one is not, so the
+    cut is made on the timestamp: an M15 bar still forming at the sweep would
+    otherwise contribute a wick the market had not yet printed.
+    """
+    if htf is None or len(htf) < 2 * k + 1:
+        return None
+    pools = swing_highs(htf, k) if direction == "long" else swing_lows(htf, k)
+    high = htf["high"].to_numpy()
+    low = htf["low"].to_numpy()
+    idx = htf.index
+    ahead = [p for p in pools if idx[p] < before
+             and ((high[p] > beyond) if direction == "long" else (low[p] < beyond))]
+    if not ahead:
+        return None
+    return float(high[ahead[-1]] if direction == "long" else low[ahead[-1]])
+
+
 def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
              htf: pd.DataFrame | None = None, cfg: PiffConfig = PiffConfig(),
-             pending: bool = False) -> PiffSignal:
+             pending: bool = False,
+             target_bars: pd.DataFrame | None = None) -> PiffSignal:
     """One decision, from three timeframes, exactly as the author reads them.
 
     `structure_bars` (M10-M15) carries the sweep and the structure shift.
     `entry_bars` (M1) carries the fair value gap and the test of it.
     `htf` (M15-H1) carries the directional bias.
+    `target_bars` (M15) carries the wick the target aims at. It is a separate
+    input because the bias and the target are read on different frames: the
+    bias may be H1 while the target is the M15 wick of the previous move. When
+    it is not supplied the bias frame is used, which is correct only when that
+    frame is itself M15.
 
     Searching the gap on M1 inside the window the structure leg spans is the
     whole point: the shift says where and which way, the M1 gap says at what
@@ -454,20 +497,31 @@ f"limit {cfg.fvg_max_age}"))
             # The author's own words put it at "la derniere meche plus haute
             # creee par le mouvement precedent qui a casse le mouvement d'avant
             # encore": one pool further out.
-            pools = s_hi if direction == "long" else s_lo
-            ahead = [p for p in pools if p < s_idx
-                     and ((s_high[p] > opp_level) if direction == "long"
-                          else (s_low[p] < opp_level))]
-            if ahead:
-                target = float(s_high[ahead[-1]] if direction == "long"
-                               else s_low[ahead[-1]])
+            # Read on the frame cfg.target_frame names. On "htf" that is the
+            # M15 wick the previous move left; on "structure" the M5 swing.
+            if cfg.target_frame == "htf":
+                found = htf_pool(target_bars if target_bars is not None else htf,
+                                 direction, structure_bars.index[s_idx],
+                                 opp_level, cfg.swing_k)
+                pool_frame = "M15 wick"
+            else:
+                pools = s_hi if direction == "long" else s_lo
+                ahead = [p for p in pools if p < s_idx
+                         and ((s_high[p] > opp_level) if direction == "long"
+                              else (s_low[p] < opp_level))]
+                found = (float(s_high[ahead[-1]] if direction == "long"
+                               else s_low[ahead[-1]]) if ahead else None)
+                pool_frame = "structure swing"
+
+            if found is not None:
+                target = found
                 target_kind = "pool"
             elif cfg.fallback_rr > 0:
                 target = float(entry + cfg.fallback_rr * stop_points if direction == "long"
                                else entry - cfg.fallback_rr * stop_points)
                 target_kind = "synthetic"
             else:
-                note(direction, 11, (f"no liquidity pool beyond the {opp_level:,.1f} "
+                note(direction, 11, (f"no {pool_frame} beyond the {opp_level:,.1f} "
                                      f"structure level to target"))
                 continue
             if (target <= entry) if direction == "long" else (target >= entry):

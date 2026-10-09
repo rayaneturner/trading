@@ -97,7 +97,8 @@ def resample(bars: pd.DataFrame, rule: str, drop_partial: bool = True) -> pd.Dat
 
 def signal_from_m1(m1: pd.DataFrame, structure_rule: str = "5min",
                    htf: pd.DataFrame | None = None,
-                   cfg: PiffConfig = PiffConfig()) -> PiffSignal:
+                   cfg: PiffConfig = PiffConfig(),
+                   target_bars: pd.DataFrame | None = None) -> PiffSignal:
     """The decision, from one M1 series plus an optional higher-timeframe frame.
 
     The structure frame is derived, not downloaded: the sweep and the shift then
@@ -105,8 +106,16 @@ def signal_from_m1(m1: pd.DataFrame, structure_rule: str = "5min",
 
     M5 is the default because that is the timeframe the author reads structure
     breaks on. The higher timeframe (M15 to H1) supplies the bias only.
+
+    `target_bars` is the M15 frame the target is read on. Without it the target
+    falls back to M15 resampled from this same M1 series, which reaches back
+    only as far as M1 does -- about eight hours on a 500-bar request, so a pool
+    older than that is invisible. Pass the separately fetched M15 series to see
+    further.
     """
     structure = resample(m1, structure_rule)
+    target = target_bars if target_bars is not None else resample(m1, "15min")
     if htf is None:
-        return generate(m1, structure, None, replace(cfg, require_htf_bias=False))
-    return generate(m1, structure, htf, cfg)
+        return generate(m1, structure, None, replace(cfg, require_htf_bias=False),
+                        target_bars=target)
+    return generate(m1, structure, htf, cfg, target_bars=target)
