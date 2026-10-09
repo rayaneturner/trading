@@ -112,6 +112,12 @@ personne ne tient −88 %.
 
 ## Ce que le backtest ne contient pas, et qui compte
 
+0. **Le trou se comble avec une commande, depuis une machine qui a accès aux
+   exchanges** : `python fetch_history.py --exchange kraken --assets BTC,ETH,SOL`
+   reconstruit `data/prices_daily.csv` avec SOL, puis `run_backtest.py` et
+   `run_validation.py` revalident tout. Ce qu'il faut n'est pas un outil de replay,
+   c'est de l'OHLCV quotidien brut.
+
 1. **SOL n'est pas dans le backtest.** Aucune série de prix SOL n'est accessible
    depuis cet environnement : la policy réseau bloque toutes les API d'exchange
    (Binance, Kraken, Coinbase, CoinGecko…), et le jeu de données Coin Metrics
@@ -146,7 +152,7 @@ pip install -r requirements.txt
 python run_backtest.py                       # performance vs HODL sur les données de recherche
 python run_backtest.py --cost 0.003          # avec des frais doublés
 python run_validation.py                     # grille, split IS/OOS, sensibilités
-python -m pytest tests -q                    # 24 tests : look-ahead, plafonds, coûts, enveloppe
+python -m pytest tests -q                    # 25 tests : look-ahead, plafonds, coûts, enveloppe
 ```
 
 Signal du jour depuis un exchange réel (endpoints publics, aucune clé API) :
@@ -335,7 +341,7 @@ on arrête et on réexamine, on n'augmente pas la taille.
 
 ```
 src/config.py       paramètres, tous documentés comme décisions de risque
-src/datafeed.py     chargement données recherche + flux live ccxt + détection de flux périmé
+src/datafeed.py     données recherche + flux live ccxt (paginé) + détection de flux périmé
 src/strategy.py     score de tendance, vol réalisée, poids cibles, calendrier et bande morte
 src/backtest.py     backtest vectorisé, retard d'exécution et coûts explicites, benchmarks
 src/metrics.py      CAGR, Sharpe, Sortino, DD, Calmar, mois perdants
@@ -344,8 +350,9 @@ src/execution.py    génération d'ordres, garde-fous, exécuteur ccxt (dry-run 
 src/agent.py        instantané point-in-time, appel LLM en sortie structurée, enveloppe de risque
 src/agent_replay.py harnais de mesure de l'agent, avec refus des fenêtres contaminées
 mcp_server.py       serveur MCP : lecture d'état + tilts bornés, jamais de poids directs
+fetch_history.py    reconstruit le CSV de recherche depuis un exchange (à lancer chez toi)
 run_backtest.py / run_validation.py / run_live.py / run_agent.py / run_agent_replay.py
-tests/              24 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
+tests/              25 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
 data/prices_daily.csv   closes quotidiens BTC/ETH (Coin Metrics), 2010 → 2026-05
 ```
 

@@ -75,6 +75,52 @@ def fetch_ccxt(assets=("BTC", "ETH", "SOL"), exchange="kraken", quote="USD",
     return frame
 
 
+def fetch_ccxt_history(assets=("BTC", "ETH", "SOL"), exchange="kraken", quote="USD",
+                       timeframe="1d", since="2017-01-01", page=720) -> pd.DataFrame:
+    """Full daily history from a live exchange, paginated.
+
+    `fetch_ccxt` takes one page and is enough for signals; this walks back to
+    `since` and is what you run once to build the research CSV. Venues cap a page
+    at a few hundred to a few thousand candles (Kraken 720, Binance 1000), so the
+    page size is a parameter rather than a constant.
+
+    The final row is today's unfinished candle and is dropped: leaving it in makes
+    the last signal repaint intraday.
+    """
+    import ccxt
+
+    client = getattr(ccxt, exchange)({"enableRateLimit": True})
+    start_ms = int(pd.Timestamp(since).timestamp() * 1000)
+    day_ms = 86_400_000
+
+    series = {}
+    for asset in assets:
+        symbol = f"{asset}/{quote}"
+        bars, cursor = [], start_ms
+        while True:
+            batch = client.fetch_ohlcv(symbol, timeframe=timeframe, since=cursor, limit=page)
+            if not batch:
+                break
+            # A venue that ignores `since` returns the same window forever.
+            fresh = [b for b in batch if b[0] >= cursor]
+            if not fresh:
+                break
+            bars.extend(fresh)
+            next_cursor = fresh[-1][0] + day_ms
+            if next_cursor <= cursor or fresh[-1][0] >= pd.Timestamp.now("UTC").value // 10**6:
+                break
+            cursor = next_cursor
+
+        if not bars:
+            continue
+        dedup = {bar[0]: bar[4] for bar in bars}
+        idx = pd.to_datetime(sorted(dedup), unit="ms", utc=True).tz_localize(None).normalize()
+        series[asset] = pd.Series([dedup[k] for k in sorted(dedup)], index=idx)
+
+    frame = pd.DataFrame(series).sort_index()
+    return frame.iloc[:-1] if len(frame) else frame
+
+
 def clean(prices: pd.DataFrame, min_history: int = 260) -> pd.DataFrame:
     """Forward-fill single-day gaps, drop assets with too little history.
 

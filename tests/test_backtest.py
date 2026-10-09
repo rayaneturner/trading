@@ -78,3 +78,35 @@ def test_turnover_cap_drops_buys_but_keeps_sells():
                                cash=500.0, limits=limits)
     assert [o.side for o in orders] == ["sell"]
     assert diag["warning"] is not None
+
+
+class _FakeExchange:
+    """Paginating venue stub: 720 daily candles per page, honours `since`."""
+
+    def __init__(self, n_days=2000, start="2020-04-10"):
+        self.start = pd.Timestamp(start)
+        self.n_days = n_days
+        self.calls = 0
+
+    def fetch_ohlcv(self, symbol, timeframe="1d", since=None, limit=720):
+        self.calls += 1
+        base = int(self.start.timestamp() * 1000)
+        day = 86_400_000
+        all_bars = [[base + i * day, 1, 1, 1, 100.0 + i, 0] for i in range(self.n_days)]
+        bars = [b for b in all_bars if since is None or b[0] >= since]
+        return bars[:limit]
+
+
+def test_paginated_history_walks_back_and_dedupes(monkeypatch):
+    import sys, types
+    from src import datafeed
+
+    fake = _FakeExchange()
+    module = types.SimpleNamespace(kraken=lambda *a, **k: fake)
+    monkeypatch.setitem(sys.modules, "ccxt", module)
+
+    frame = datafeed.fetch_ccxt_history(("BTC",), exchange="kraken", since="2020-04-10")
+    assert frame.index.is_monotonic_increasing
+    assert not frame.index.has_duplicates
+    assert len(frame) == fake.n_days - 1          # today's unfinished candle dropped
+    assert fake.calls >= 3                        # 2000 days at 720 per page
