@@ -429,10 +429,23 @@ f"limit {cfg.fvg_max_age}"))
                 note(direction, 10, "entry and stop coincide")
                 continue
 
+            # The target is the pool BEYOND the level that defined the structure
+            # break, not that level itself. Using the same swing for both made
+            # the two conditions contradict each other: structure only breaks
+            # once price closes past the level, so the target was already taken
+            # the moment the setup became valid. Measured live that produced an
+            # entry at 30,827.95 with a target at 30,855.40 while price stood at
+            # 30,853.30 — an R:R of 0.66 on a setup the author trades at 4:1.
+            # The author's own words put it at "la derniere meche plus haute
+            # creee par le mouvement precedent qui a casse le mouvement d'avant
+            # encore": one pool further out.
             pools = s_hi if direction == "long" else s_lo
-            ahead = [p for p in pools if p < s_idx]
+            ahead = [p for p in pools if p < s_idx
+                     and ((s_high[p] > opp_level) if direction == "long"
+                          else (s_low[p] < opp_level))]
             if not ahead:
-                note(direction, 5, "no opposing liquidity pool to target")
+                note(direction, 11, (f"no liquidity pool beyond the {opp_level:,.1f} "
+                                     f"structure level to target"))
                 continue
             target = float(s_high[ahead[-1]] if direction == "long" else s_low[ahead[-1]])
             if (target <= entry) if direction == "long" else (target >= entry):

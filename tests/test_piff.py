@@ -65,47 +65,63 @@ def _piff_short_setup():
     """The full PIFF sequence, bar by bar, on M1 (5 bars per structure bar).
 
     sb0  flat
-    sb1  the swing high at 23060 — the liquidity the move will take
-    sb2  the swing low at 22980 — the opposing structure, and the eventual target
-    sb3  a pullback that sets no new extreme
-    sb4  ONE bar sweeps 23060 and closes under 22980: sweep and structure shift
+    sb1  an earlier low at 22950 — the pool the trade will target
+    sb2  back to the range
+    sb3  the swing high at 23060 — the liquidity the move will take
+    sb4  the swing low at 22980 — the level whose break shifts structure
+    sb5  a pullback that sets no new extreme
+    sb6  ONE bar sweeps 23060 and closes under 22980: sweep and structure shift
          on the same bar, and the displacement leaves an M1 gap at 23030-23040
-    sb5  the retrace begins
-    sb6  price trades back into the gap, pokes above it, and closes inside on a
+    sb7  the retrace begins
+    sb8  price trades back into the gap, pokes above it, and closes inside on a
          bearish engulfing bar — the trigger
     """
     rows = [[23000, 23005, 22995, 23000]] * 5 + [
-        # sb1 (5-9) the swing high at 23060
+        # sb1 (5-9) an EARLIER low at 22950 — the pool the trade targets. It has
+        # to exist and sit beyond the structure level, or there is nothing left
+        # to aim at once the break has taken 22980.
+        [23000, 23002, 22980, 22985],
+        [22985, 22990, 22960, 22965],
+        [22965, 22970, 22950, 22955],
+        [22955, 22975, 22952, 22972],
+        [22972, 22990, 22970, 22988],
+        # sb2 (10-14) back to the range, no new extreme
+        [22988, 23000, 22986, 22998],
+        [22998, 23005, 22996, 23002],
+        [23002, 23006, 22998, 23000],
+        [23000, 23004, 22997, 23001],
+        [23001, 23005, 22999, 23000],
+        # sb3 (15-19) the swing high at 23060
         [23000, 23020, 22998, 23018],
         [23018, 23040, 23016, 23038],
         [23038, 23060, 23036, 23055],
         [23055, 23058, 23045, 23050],
         [23050, 23052, 23046, 23050],
-        # sb2 (10-14) the swing low at 22980
+        # sb4 (20-24) the swing low at 22980
         [23050, 23050, 23030, 23032],
         [23032, 23034, 23010, 23012],
         [23012, 23014, 22990, 22992],
         [22992, 22994, 22980, 22985],
         [22985, 22992, 22982, 22990],
-        # sb3 (15-19) pullback, no new extreme either side
+        # sb5 (25-29) pullback, no new extreme either side
         [22990, 23005, 22988, 23002],
         [23002, 23015, 23000, 23012],
         [23012, 23025, 23010, 23022],
         [23022, 23030, 23018, 23026],
         [23026, 23028, 23016, 23020],
-        # sb4 (20-24) sweep + shift, and the gap the displacement leaves
+        # sb6 (30-34) sweep + shift, and the gap the displacement leaves
         [23020, 23075, 23040, 23045],
         [23045, 23050, 23030, 23035],
         [23028, 23030, 22990, 22992],   # bar i: high 23030 < low 23040 two bars back
         [22992, 22995, 22965, 22970],
         [22970, 22975, 22960, 22965],
-        # sb5 (25-29) the retrace
+        # sb7 (35-39) the retrace
         [22965, 22985, 22963, 22982],
         [22982, 23000, 22980, 22998],
         [22998, 23012, 22996, 23010],
         [23010, 23014, 23005, 23012],
         [23012, 23015, 23010, 23014],
-        # sb6 (30-34) into the gap, fake above, engulfing close inside
+        # sb8 (40-44) into the gap, fake above, engulfing close inside
         [23014, 23022, 23012, 23020],
         [23020, 23030, 23018, 23028],
         [23028, 23036, 23026, 23034],
@@ -138,9 +154,9 @@ def test_full_short_sequence_fires_on_the_confirming_bar():
     assert sig.fvg == (23030.0, 23040.0)     # the FIRST M1 gap, at the origin of the leg
     assert sig.entry == 23032.0              # the low of the confirming bar
     assert sig.stop == 23044.0               # its high, plus the 2-point buffer
-    assert sig.target == 22980.0             # the swing low the previous leg left
+    assert sig.target == 22950.0             # the pool BEYOND the 22,980 break level
     assert sig.stop_points == 12.0
-    assert round(sig.rr, 2) == 4.33          # the author's own 4:1 profile
+    assert round(sig.rr, 2) == 6.83
     assert not sig.rejected
     # And the venue's cost is a bounded fraction of the risk, on the real fee.
     assert sig.fee_fraction_of_r < PiffConfig.max_fee_fraction_of_r
@@ -155,7 +171,7 @@ def test_limit_mode_leans_on_the_swept_level_instead():
     assert sig.entry == 23040.0              # the far edge of the gap
     assert sig.stop == 23062.0               # beyond the swept high, not the bar
     assert sig.stop_points == 22.0           # wider stop, lower R:R — the trade-off
-    assert sig.rr < 4.0
+    assert sig.rr < 6.0
 
 
 def test_htf_bias_vetoes_the_wrong_direction():
@@ -189,7 +205,7 @@ def test_session_filter_blocks_outside_hours():
 
 def test_min_rr_rejects_a_setup_that_does_not_pay_enough():
     entry = _piff_short_setup()
-    sig = generate(entry, _structure(entry), None, _cfg(min_rr=6.0))
+    sig = generate(entry, _structure(entry), None, _cfg(min_rr=8.0))
     assert sig.action == "flat"
     assert any("R:R" in r for r in sig.rejected)
 
@@ -243,7 +259,7 @@ def test_pending_mode_arms_an_order_before_price_returns():
     assert sig.entry_type == "limit"
     assert sig.entry == 23040.0          # rests at the far edge of the gap
     assert sig.stop == 23062.0           # behind the swept high
-    assert sig.target == 22980.0
+    assert sig.target == 22950.0
     assert "awaiting the retrace" in " ".join(sig.reasons)
 
 
@@ -286,3 +302,15 @@ def test_pending_mode_is_off_when_only_stop_entries_are_allowed():
     entry = _piff_armed_setup()
     sig = generate(entry, _structure(entry), None, _cfg(entry_mode="stop"), pending=True)
     assert sig.action == "flat"
+
+
+def test_the_target_sits_beyond_the_structure_level_not_on_it():
+    """Otherwise the two conditions contradict: structure breaks by closing past
+    the level, so a target on that level is already taken when the setup forms.
+    """
+    entry = _piff_short_setup()
+    sig = generate(entry, _structure(entry), None, _cfg())
+    assert sig.action == "short"
+    # the shift was called on the swing low at 22,980; the target must be beyond it
+    assert sig.target < 22980.0
+    assert sig.rr > 1.0
