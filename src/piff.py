@@ -40,10 +40,14 @@ import pandas as pd
 class PiffConfig:
     # --- structure ---
     swing_k: int = 2                 # fractal half-width: a swing is the extreme of 2k+1 bars
-    sweep_max_age: int = 40          # bars a swept swing stays relevant
+    # Both lookbacks have to cover the same wall-clock span. They are counted
+    # in DIFFERENT units — sweeps in structure bars, gaps in entry bars — so
+    # leaving them unrelated made every gap stale before price could return to
+    # it: 40 M15 bars reach back 600 minutes, 60 M1 bars only 60.
+    sweep_max_age: int = 8           # structure bars a swept swing stays relevant
     mss_max_age: int = 20            # bars between the sweep and the structure shift
     fvg_min_points: float = 2.0      # ignore imbalances too small to be a zone
-    fvg_max_age: int = 60            # bars a gap stays valid before it is stale
+    fvg_max_age: int = 120           # entry bars a gap stays valid before it is stale
 
     # --- entry ---
     entry_mode: str = "both"         # "limit" | "stop" | "both"
@@ -64,7 +68,8 @@ class PiffConfig:
     session_start_hour: int | None = 13
     session_end_hour: int | None = 21
 
-    min_bars: int = 120
+    min_bars: int = 120             # entry-timeframe bars required
+    min_structure_bars: int = 30    # structure-timeframe bars required
 
 
 @dataclass
@@ -81,6 +86,9 @@ class PiffSignal:
     fvg: tuple = ()
     reasons: list = field(default_factory=list)
     rejected: list = field(default_factory=list)
+    # Where the chain stopped, per direction. A rule that only ever answers
+    # "no setup" cannot be debugged or trusted: this says which link failed.
+    trace: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {"action": self.action, "entry_type": self.entry_type,
@@ -90,7 +98,8 @@ class PiffSignal:
                 "fee_fraction_of_r": round(self.fee_fraction_of_r, 3),
                 "swept_level": round(self.swept_level, 2),
                 "fvg": [round(x, 2) for x in self.fvg],
-                "reasons": self.reasons, "rejected": self.rejected}
+                "reasons": self.reasons, "rejected": self.rejected,
+                "trace": self.trace}
 
 
 def swing_highs(bars: pd.DataFrame, k: int) -> np.ndarray:
@@ -191,9 +200,22 @@ def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
     whole point: the shift says where and which way, the M1 gap says at what
     price, and the test of that gap is what triggers.
     """
-    rejected = []
-    if len(entry_bars) < cfg.min_bars or len(structure_bars) < cfg.min_bars // 4:
-        return PiffSignal("flat", rejected=["not enough history"])
+    rejected: list = []
+    # The furthest stage each direction reached, so a refusal is diagnostic.
+    # Several sweeps are tried per direction and the LAST failure is usually the
+    # least informative one, so the deepest is what gets kept.
+    depth: dict = {}
+    trace: dict = {}
+
+    def note(direction: str, stage: int, why: str) -> None:
+        if depth.get(direction, -1) <= stage:
+            depth[direction], trace[direction] = stage, why
+    if len(entry_bars) < cfg.min_bars:
+        return PiffSignal("flat", rejected=[
+            f"only {len(entry_bars)} entry bars, need {cfg.min_bars}"])
+    if len(structure_bars) < cfg.min_structure_bars:
+        return PiffSignal("flat", rejected=[
+            f"only {len(structure_bars)} structure bars, need {cfg.min_structure_bars}"])
 
     now = entry_bars.index[-1]
     if cfg.session_start_hour is not None:
@@ -215,13 +237,23 @@ def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
     e_low = entry_bars["low"].to_numpy()
     e_last = len(entry_bars) - 1
 
+    bar_span = (structure_bars.index[1] - structure_bars.index[0]
+                if len(structure_bars) > 1 else pd.Timedelta(minutes=5))
+
     best = None
+    fallback = None
     for direction in ("long", "short"):
         if cfg.require_htf_bias and bias is not None and bias != direction:
+            note(direction, 0, f"the higher timeframe reads {bias}")
             continue
 
+        # Every sweep still inside the lookback is a candidate, newest first.
+        # One sweep is not enough: the newest one may never produce a shift, or
+        # may leave no gap, while an older one has the whole sequence behind it.
+        # Taking a single candidate and giving up made the rule answer "no
+        # setup" on price action that plainly contained one.
         pool = s_lo if direction == "long" else s_hi
-        sweep = None
+        sweeps = []
         for s in range(max(0, s_last - cfg.sweep_max_age), s_last + 1):
             prior = [p for p in pool if p < s - cfg.swing_k]
             if not prior:
@@ -230,102 +262,143 @@ def generate(entry_bars: pd.DataFrame, structure_bars: pd.DataFrame,
             took = s_low[s] < level if direction == "long" else s_high[s] > level
             back = s_close[s] > level if direction == "long" else s_close[s] < level
             if took and back:
-                sweep = (s, float(level))
-        if sweep is None:
-            continue
-        s_idx, swept = sweep
-
-        opp = s_hi if direction == "long" else s_lo
-        opp_prior = [p for p in opp if p < s_idx]
-        if not opp_prior:
-            continue
-        opp_level = s_high[opp_prior[-1]] if direction == "long" else s_low[opp_prior[-1]]
-        # The shift may land on the sweep bar itself: one bar can take the high
-        # and close beyond the opposing low. That is a displacement bar, not an
-        # edge case, and excluding it loses the cleanest setups.
-        mss = None
-        for m in range(s_idx, min(s_idx + cfg.mss_max_age, s_last) + 1):
-            if (s_close[m] > opp_level) if direction == "long" else (s_close[m] < opp_level):
-                mss = m
-                break
-        if mss is None:
+                sweeps.append((s, float(level)))
+        if not sweeps:
+            note(direction, 1, "no swing was swept and reclaimed")
             continue
 
-        # The M1 window the structure leg spans, mapped by timestamp. The end is
-        # the close of the shifting bar, not its open, or the displacement that
-        # carved the gap falls outside the window.
-        bar_span = (structure_bars.index[1] - structure_bars.index[0]
-                    if len(structure_bars) > 1 else pd.Timedelta(minutes=5))
-        t0, t1 = structure_bars.index[s_idx], structure_bars.index[mss] + bar_span
-        window = np.flatnonzero((entry_bars.index >= t0) & (entry_bars.index < t1))
-        if window.size < 3:
-            continue
-        gap = find_fvg(entry_bars, int(window[0]), int(window[-1]), direction, cfg.fvg_min_points)
-        if gap is None or e_last - gap[2] > cfg.fvg_max_age:
-            continue
-        g_low, g_high, g_idx = gap
+        for s_idx, swept in reversed(sweeps):
+            opp = s_hi if direction == "long" else s_lo
+            opp_prior = [p for p in opp if p < s_idx]
+            if not opp_prior:
+                note(direction, 2, "no opposing swing before the sweep")
+                continue
+            opp_level = s_high[opp_prior[-1]] if direction == "long" else s_low[opp_prior[-1]]
 
-        # The gap has to have been TESTED: price must have traded back into it
-        # after it formed, not merely be near it now.
-        tested = np.any((e_low[g_idx + 1:] <= g_high) & (e_high[g_idx + 1:] >= g_low))
-        if not tested:
-            continue
-        if not (g_low <= e_close[e_last] <= g_high):
-            continue
+            # The shift may land on the sweep bar itself: one bar can take the
+            # high and close beyond the opposing low. That is a displacement
+            # bar, not an edge case, and excluding it loses the cleanest setups.
+            mss = None
+            for m in range(s_idx, min(s_idx + cfg.mss_max_age, s_last) + 1):
+                if (s_close[m] > opp_level) if direction == "long" else (s_close[m] < opp_level):
+                    mss = m
+                    break
+            if mss is None:
+                note(direction, 3, (f"no close beyond {opp_level:,.1f} within "
+f"{cfg.mss_max_age} bars of the sweep"))
+                continue
 
-        confirm = is_confirming(entry_bars, e_last, direction)
-        if cfg.entry_mode in ("stop", "both") and confirm:
-            entry_type = "stop"
-            entry = float(e_high[e_last] if direction == "long" else e_low[e_last])
-            anchor = float(e_low[e_last] if direction == "long" else e_high[e_last])
-        elif cfg.entry_mode in ("limit", "both"):
-            entry_type = "limit"
-            edge = {"near": g_high if direction == "long" else g_low,
-                    "far": g_low if direction == "long" else g_high,
-                    "mid": (g_low + g_high) / 2}[cfg.fill_at]
-            entry = float(edge)
-            anchor = swept
-        else:
-            continue
+            # The entry-timeframe window the structure leg spans, mapped by
+            # timestamp. The end is the close of the shifting bar, not its open,
+            # or the displacement that carved the gap falls outside the window.
+            t0, t1 = structure_bars.index[s_idx], structure_bars.index[mss] + bar_span
+            window = np.flatnonzero((entry_bars.index >= t0) & (entry_bars.index < t1))
+            if window.size < 3:
+                note(direction, 4, "structure window too short to hold a 3-bar gap")
+                continue
+            gap = find_fvg(entry_bars, int(window[0]), int(window[-1]), direction,
+                           cfg.fvg_min_points)
+            if gap is None:
+                note(direction, 5, f"no {cfg.fvg_min_points:g}-point gap in the shifting leg")
+                continue
+            g_low, g_high, g_idx = gap
+            if e_last - g_idx > cfg.fvg_max_age:
+                note(direction, 6, (f"the gap is {e_last - g_idx} bars old, "
+f"limit {cfg.fvg_max_age}"))
+                continue
 
-        buf = cfg.stop_buffer_points
-        stop = anchor - buf if direction == "long" else anchor + buf
-        stop_points = abs(entry - stop)
-        if stop_points <= 0:
-            continue
+            # Price has to be IN the gap right now — by its wick, not its close.
+            # A bar that reaches into the zone and closes back out of it is the
+            # rejection the setup is waiting for: requiring the close inside
+            # would throw away exactly the hammer the author enters on.
+            if not (e_low[e_last] <= g_high and e_high[e_last] >= g_low):
+                note(direction, 5, (f"price is at {e_close[e_last]:,.1f}, not touching "
+f"the {g_low:,.1f}-{g_high:,.1f} gap"))
+                continue
+            # Whether an earlier bar already reached the zone decides which of
+            # the author's two entries this is, and what the stop leans on.
+            retest = bool(np.any((e_low[g_idx + 1:e_last] <= g_high)
+                                 & (e_high[g_idx + 1:e_last] >= g_low)))
 
-        pools = s_hi if direction == "long" else s_lo
-        ahead = [p for p in pools if p < s_idx]
-        if not ahead:
-            continue
-        target = float(s_high[ahead[-1]] if direction == "long" else s_low[ahead[-1]])
-        if (target <= entry) if direction == "long" else (target >= entry):
-            continue
+            confirm = is_confirming(entry_bars, e_last, direction)
+            if not confirm:
+                note(direction, 5, "touching the gap but the current bar does not confirm")
+                continue
+            if retest and cfg.entry_mode in ("stop", "both"):
+                # The usual case: a first poke, then a retest that confirms.
+                # Entry triggers on the break of the confirming bar and the stop
+                # leans on it — the tight stops in the log.
+                entry_type = "stop"
+                entry = float(e_high[e_last] if direction == "long" else e_low[e_last])
+                anchor = float(e_low[e_last] if direction == "long" else e_high[e_last])
+            elif cfg.entry_mode in ("limit", "both"):
+                # The other case the author describes: the FIRST confirming bar
+                # in the zone fills a resting order at the gap edge. Less has
+                # been proven, so the stop sits behind the swept level.
+                entry_type = "limit"
+                entry = float({"near": g_high if direction == "long" else g_low,
+                               "far": g_low if direction == "long" else g_high,
+                               "mid": (g_low + g_high) / 2}[cfg.fill_at])
+                anchor = swept
+            else:
+                note(direction, 5, ("a retest confirmed but stop entries are off, and "
+"this is not the first touch"))
+                continue
 
-        rr = abs(target - entry) / stop_points
-        fee_fraction = (2 * cfg.fee_per_side * entry) / stop_points
-        candidate = PiffSignal(
-            action=direction, entry_type=entry_type, entry=entry, stop=stop,
-            target=target, stop_points=stop_points, rr=rr,
-            fee_fraction_of_r=fee_fraction, swept_level=swept, fvg=(g_low, g_high),
-            reasons=[f"swept the {'low' if direction == 'long' else 'high'} at {swept:,.1f}",
-                     f"structure shifted on {structure_bars.index[mss]}",
-                     f"M1 gap {g_low:,.1f}-{g_high:,.1f}, tested and price inside",
-                     f"entry {entry_type}" + (f" on a {confirm}" if entry_type == "stop" else "")],
-        )
-        if rr < cfg.min_rr:
-            candidate.rejected.append(f"R:R {rr:.2f} below the {cfg.min_rr} minimum")
-        if fee_fraction > cfg.max_fee_fraction_of_r:
-            candidate.rejected.append(
-                f"stop {stop_points:.1f} pts carries {fee_fraction:.2f}R of fees, "
-                f"above the {cfg.max_fee_fraction_of_r:.2f}R limit")
-        if candidate.rejected:
-            candidate.action = "flat"
-        if best is None or (candidate.action != "flat" and candidate.rr > best.rr):
-            best = candidate
+            buf = cfg.stop_buffer_points
+            stop = anchor - buf if direction == "long" else anchor + buf
+            stop_points = abs(entry - stop)
+            if stop_points <= 0:
+                note(direction, 10, "entry and stop coincide")
+                continue
+
+            pools = s_hi if direction == "long" else s_lo
+            ahead = [p for p in pools if p < s_idx]
+            if not ahead:
+                note(direction, 5, "no opposing liquidity pool to target")
+                continue
+            target = float(s_high[ahead[-1]] if direction == "long" else s_low[ahead[-1]])
+            if (target <= entry) if direction == "long" else (target >= entry):
+                note(direction, 12, (f"the target at {target:,.1f} sits the wrong side "
+f"of the entry"))
+                continue
+
+            rr = abs(target - entry) / stop_points
+            fee_fraction = (2 * cfg.fee_per_side * entry) / stop_points
+            candidate = PiffSignal(
+                action=direction, entry_type=entry_type, entry=entry, stop=stop,
+                target=target, stop_points=stop_points, rr=rr,
+                fee_fraction_of_r=fee_fraction, swept_level=swept,
+                fvg=(g_low, g_high), trace=trace,
+                reasons=[f"swept the {'low' if direction == 'long' else 'high'} at {swept:,.1f}",
+                         f"structure shifted on {structure_bars.index[mss]}",
+                         f"gap {g_low:,.1f}-{g_high:,.1f}"
+                         + (" retested" if retest else " on first touch"),
+                         f"entry {entry_type} on a {confirm}"],
+            )
+            if rr < cfg.min_rr:
+                candidate.rejected.append(f"R:R {rr:.2f} below the {cfg.min_rr} minimum")
+            if fee_fraction > cfg.max_fee_fraction_of_r:
+                candidate.rejected.append(
+                    f"stop {stop_points:.1f} pts carries {fee_fraction:.2f}R of fees, "
+                    f"above the {cfg.max_fee_fraction_of_r:.2f}R limit")
+            if candidate.rejected:
+                # A setup that exists but does not pay is worth reporting; it is
+                # not worth preferring over one that does, so it is only a
+                # fallback and the search keeps going.
+                candidate.action = "flat"
+                fallback = fallback or candidate
+                continue
+            if best is None or candidate.rr > best.rr:
+                best = candidate
+            break
 
     if best is None:
-        return PiffSignal("flat", rejected=rejected + ["no sweep -> shift -> tested M1 gap sequence"])
+        if fallback is not None:
+            return fallback
+        return PiffSignal("flat", trace=trace, rejected=rejected + [
+            "; ".join(f"{d}: {why}" for d, why in trace.items())
+            or "no sweep -> shift -> gap sequence"])
     if rejected:
         best.action = "flat"
         best.rejected = rejected + best.rejected

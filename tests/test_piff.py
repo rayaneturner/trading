@@ -122,7 +122,7 @@ def _structure(entry):
 
 
 def _cfg(**kw):
-    base = dict(min_bars=20, swing_k=1, fvg_min_points=1.0, min_rr=0.1,
+    base = dict(min_bars=20, min_structure_bars=5, swing_k=1, fvg_min_points=1.0, min_rr=0.1,
                 require_htf_bias=False, session_start_hour=None)
     base.update(kw)
     return PiffConfig(**base)
@@ -174,7 +174,8 @@ def test_htf_bias_vetoes_the_wrong_direction():
 
 def test_flat_market_produces_nothing():
     entry = flat_bars(200)
-    cfg = PiffConfig(min_bars=50, require_htf_bias=False, session_start_hour=None)
+    cfg = PiffConfig(min_bars=50, min_structure_bars=5, require_htf_bias=False,
+                     session_start_hour=None)
     assert generate(entry, _structure(entry), None, cfg).action == "flat"
 
 
