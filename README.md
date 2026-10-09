@@ -152,7 +152,7 @@ pip install -r requirements.txt
 python run_backtest.py                       # performance vs HODL sur les données de recherche
 python run_backtest.py --cost 0.003          # avec des frais doublés
 python run_validation.py                     # grille, split IS/OOS, sensibilités
-python -m pytest tests -q                    # 25 tests : look-ahead, plafonds, coûts, enveloppe
+python -m pytest tests -q                    # 28 tests : look-ahead, plafonds, coûts, enveloppe
 ```
 
 Signal du jour depuis un exchange réel (endpoints publics, aucune clé API) :
@@ -306,6 +306,53 @@ hasard dans [−1, 0] va simplement sous-performer la règle en restant trop sou
 cash, et ça ne se verra qu'après plusieurs mois de mesure. C'est précisément pour ça
 que le critère d'acceptation se fixe avant, et que le niveau 3 attend la mesure.
 
+## Pourquoi il n'y a pas de stop-loss, et ce que vaut un coupe-circuit journalier
+
+Mesuré sur 2017-2026 (`python run_risk_rules.py`) :
+
+| | CAGR | vol | Sharpe | max DD | Calmar | déclenchements |
+|---|---|---|---|---|---|---|
+| **sans stop** | **42,6 %** | 38,0 % | **1,12** | **−43,0 %** | **0,99** | — |
+| stop −5 %, flat jusqu'au rebalancement | 31,0 % | 34,8 % | 0,89 | −47,4 % | 0,66 | 46 |
+| stop −5 %, flat 5 jours | 38,5 % | 33,4 % | 1,15 | −50,1 % | 0,77 | 41 |
+| stop −7 %, flat 5 jours | 38,3 % | 35,8 % | 1,07 | −47,5 % | 0,81 | 15 |
+| stop −10 %, flat 5 jours | 46,3 % | 37,2 % | 1,24 | −42,1 % | 1,10 | 2 |
+
+Un coupe-circuit à −5 % **dégrade tout ce qui compte**, drawdown maximal inclus :
+−47 % au lieu de −43 %. Le mécanisme est identifié, pas supposé. Après chacun des
+53 jours à moins de −5 %, les 5 jours suivants ont rapporté **+0,98 % en moyenne**
+(médiane +0,58 %, 55 % de positifs) contre **+0,59 %** en moyenne inconditionnelle.
+Les grosses journées de baisse sont suivies de rendements *supérieurs* à la moyenne :
+couper à ce moment-là vend le bas et rachète plus haut.
+
+À −10 % le stop devient neutre à légèrement positif, mais sur **2 déclenchements** en
+9,4 ans : statistiquement vide. Son intérêt est opérationnel, pas financier — il
+attrape un bug d'exécution ou un prix aberrant, pas un mouvement de marché.
+
+La raison de fond : ce portefeuille n'a pas de « trades » avec stops, il a des poids.
+Le signal de sortie *est* la tendance qui casse. Ajouter un stop ajoute une seconde
+règle de sortie qui contredit la première, et les deux se marchent dessus.
+
+Un coupe-circuit journalier est en revanche la bonne réponse **sur un compte à
+levier**, où la perte n'est pas bornée et où la liquidation existe. Sur du spot sans
+levier il ne protège de rien et coûte la prime de retournement. Même outil, deux
+contextes opposés.
+
+### « Risquer 1 % par trade » est déjà en place
+
+Les poids actuels, mesurés :
+
+| actif | poids | vol quotidienne | risque à 1 σ, en % du capital |
+|---|---|---|---|
+| BTC | 0,546 | 1,82 % | **0,99 %** |
+| ETH | 0,210 | 2,37 % | **0,50 %** |
+
+Le dimensionnement inverse-vol *est* un dimensionnement à risque constant : il
+maintient `poids × volatilité` à peu près fixe. La différence avec une règle « 1 % par
+trade » fixe, c'est qu'il s'adapte quand la volatilité change, au lieu de dépendre
+d'une distance de stop choisie à la main. Le portefeuille complet risque 1,14 % du
+capital par jour à 1 σ (corrélation incluse, 250 derniers jours).
+
 ## Prochaines étapes concrètes, dans l'ordre
 
 1. `python -m pytest tests -q` puis `python run_backtest.py` — vérifier que les
@@ -347,12 +394,13 @@ src/backtest.py     backtest vectorisé, retard d'exécution et coûts explicite
 src/metrics.py      CAGR, Sharpe, Sortino, DD, Calmar, mois perdants
 src/walkforward.py  grille, split IS/OOS, sensibilité coûts/retard
 src/execution.py    génération d'ordres, garde-fous, exécuteur ccxt (dry-run par défaut)
+src/risk_rules.py   coupe-circuit journalier mesuré + identité de dimensionnement du risque
 src/agent.py        instantané point-in-time, appel LLM en sortie structurée, enveloppe de risque
 src/agent_replay.py harnais de mesure de l'agent, avec refus des fenêtres contaminées
 mcp_server.py       serveur MCP : lecture d'état + tilts bornés, jamais de poids directs
 fetch_history.py    reconstruit le CSV de recherche depuis un exchange (à lancer chez toi)
-run_backtest.py / run_validation.py / run_live.py / run_agent.py / run_agent_replay.py
-tests/              25 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
+run_backtest.py / run_validation.py / run_risk_rules.py / run_live.py / run_agent.py / run_agent_replay.py
+tests/              28 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
 data/prices_daily.csv   closes quotidiens BTC/ETH (Coin Metrics), 2010 → 2026-05
 ```
 
