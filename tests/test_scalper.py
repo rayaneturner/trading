@@ -111,3 +111,19 @@ def test_intraday_preset_clears_its_own_fee_floor_only_with_a_wide_enough_stop()
     assert breakeven_multiple_of_random(floor, INTRADAY) == pytest.approx(1.18)
     # A 5m-sized stop is below it; a 4h-sized one clears it.
     assert 0.0024 < floor < 0.0146
+
+
+def test_synthetic_ohlc_preserves_the_real_closes_and_brackets_them():
+    """The proxy backtest leans on this: closes are real, extremes are simulated."""
+    from src.scalper_backtest import synthetic_ohlc
+
+    idx = pd.date_range("2020-01-01", periods=200, freq="D")
+    rng = np.random.default_rng(3)
+    closes = pd.Series(100 * np.exp(np.cumsum(rng.normal(0.001, 0.02, 200))), index=idx)
+    bars = synthetic_ohlc(closes, steps=24, seed=0)
+
+    np.testing.assert_allclose(bars["close"].to_numpy(), closes.to_numpy()[1:])
+    np.testing.assert_allclose(bars["open"].to_numpy(), closes.to_numpy()[:-1])
+    assert (bars["high"] >= bars["close"]).all()
+    assert (bars["low"] <= bars["close"]).all()
+    assert (bars["high"] >= bars["low"]).all()
