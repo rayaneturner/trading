@@ -335,8 +335,15 @@ f"{cfg.mss_max_age} bars of the sweep"))
             # The entry-timeframe window the structure leg spans, mapped by
             # timestamp. The end is the close of the shifting bar, not its open,
             # or the displacement that carved the gap falls outside the window.
-            t0, t1 = structure_bars.index[s_idx], structure_bars.index[mss] + bar_span
-            window = np.flatnonzero((entry_bars.index >= t0) & (entry_bars.index < t1))
+            # From the sweep to NOW, not to the structure break. The gap that
+            # gets retested is often carved by the displacement that FOLLOWS the
+            # break, so stopping the window at the break hid it: measured live,
+            # the three gaps inside 14:10-14:35 were all closed through while a
+            # live 17.8-point gap at 30,836.7-30,854.5 had formed at 14:51, and
+            # the engine answered "all gaps stale or closed through" with a
+            # valid zone sitting 12 points under price.
+            t0 = structure_bars.index[s_idx]
+            window = np.flatnonzero(entry_bars.index >= t0)
             if window.size < 3:
                 note(direction, 4, "structure window too short to hold a 3-bar gap")
                 continue

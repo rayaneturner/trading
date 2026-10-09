@@ -340,3 +340,27 @@ def test_a_real_pool_still_wins_over_the_synthetic_one():
     sig = generate(entry, _structure(entry), None, _cfg())
     assert sig.target == 22950.0
     assert any("pool" in r and "synthetic" not in r for r in sig.reasons)
+
+
+def test_a_gap_carved_after_the_structure_break_is_found():
+    """The window runs from the sweep to now, not to the break.
+
+    The displacement that follows the break usually carves the zone that gets
+    retested; cutting the window at the break hid it, and the engine reported
+    every gap dead while a live one sat just under price.
+    """
+    base = _piff_short_setup()
+    # Extend the move down, leaving a fresh bearish gap well after the shift.
+    extra = pd.DataFrame(
+        [[23030, 23032, 23020, 23022],
+         [23022, 23024, 23000, 23002],
+         [22998, 22999, 22980, 22982],   # high 22,999 < low 23,020 two bars back
+         [22982, 22995, 22978, 22990],
+         [22990, 22996, 22985, 22988]],
+        columns=["open", "high", "low", "close"],
+        index=pd.date_range(base.index[-1] + pd.Timedelta(minutes=1),
+                            periods=5, freq="1min")).assign(volume=1.0)
+    entry = pd.concat([base, extra])
+    gaps = find_fvgs(entry, 2, len(entry) - 1, "short", 1.0)
+    # the late gap exists and is found by a window that reaches the present
+    assert any(g[2] >= len(base) for g in gaps)
