@@ -152,7 +152,7 @@ pip install -r requirements.txt
 python run_backtest.py                       # performance vs HODL sur les données de recherche
 python run_backtest.py --cost 0.003          # avec des frais doublés
 python run_validation.py                     # grille, split IS/OOS, sensibilités
-python -m pytest tests -q                    # 28 tests : look-ahead, plafonds, coûts, enveloppe
+python -m pytest tests -q                    # 32 tests : look-ahead, plafonds, coûts, enveloppe
 ```
 
 Signal du jour depuis un exchange réel (endpoints publics, aucune clé API) :
@@ -353,6 +353,34 @@ trade » fixe, c'est qu'il s'adapte quand la volatilité change, au lieu de dép
 d'une distance de stop choisie à la main. Le portefeuille complet risque 1,14 % du
 capital par jour à 1 σ (corrélation incluse, 250 derniers jours).
 
+## Un ratio risque/récompense n'est pas un edge
+
+`python run_barrier_study.py --sl 0.02 --tp 0.06` mesure le setup type d'une
+plateforme à levier (SL 2 %, TP 1:3). L'identité qui tue l'argument marketing :
+sous une marche aléatoire sans dérive, la probabilité de toucher +3R avant −1R vaut
+exactement `1/(1+3) = 25 %`, c'est-à-dire **exactement le seuil de rentabilité d'un
+1:3**. Le ratio ne produit aucune espérance par lui-même ; tout l'edge doit venir du
+timing d'entrée.
+
+Mesure sur BTC/ETH 2017-2026, stop vérifié sur un chemin intraday (pont brownien
+calé sur les clôtures réelles, vol intraday calibrée sur la vol quotidienne) :
+
+| | taux de réussite | espérance brute | espérance nette | erreur-type |
+|---|---|---|---|---|
+| seuil théorique 1:3 | 25,0 % | 0 | — | — |
+| BTC, toutes entrées | 26,2 % | +0,05 R | −0,02 R | ±0,06 R |
+| BTC, filtre de tendance | 28,1 % | +0,12 R | **+0,05 R** | ±0,06 R |
+| ETH, filtre de tendance | 28,3 % | +0,14 R | **+0,07 R** | ±0,05 R |
+
+Avec le stop vérifié uniquement en clôture, le même test donne 38 % de réussite et
++0,54 R : **c'est ce biais de mesure qui fait vivre la plupart des backtests de
+stratégies à stop serré.** Sur une vol quotidienne BTC de 3,6 %, un stop à 2 % est à
+0,56 σ : le chemin intraday le traverse la plupart du temps.
+
+Conclusion mesurée : le filtre de tendance ajoute environ 2 points de taux de
+réussite, l'espérance nette reste positive mais **du même ordre que son erreur-type**.
+Ce n'est pas un edge établi, c'est un résultat indiscernable de zéro.
+
 ## Prochaines étapes concrètes, dans l'ordre
 
 1. `python -m pytest tests -q` puis `python run_backtest.py` — vérifier que les
@@ -395,12 +423,13 @@ src/metrics.py      CAGR, Sharpe, Sortino, DD, Calmar, mois perdants
 src/walkforward.py  grille, split IS/OOS, sensibilité coûts/retard
 src/execution.py    génération d'ordres, garde-fous, exécuteur ccxt (dry-run par défaut)
 src/risk_rules.py   coupe-circuit journalier mesuré + identité de dimensionnement du risque
+src/barrier_study.py  mesure d'un setup SL/TP fixe, stop vérifié en intraday
 src/agent.py        instantané point-in-time, appel LLM en sortie structurée, enveloppe de risque
 src/agent_replay.py harnais de mesure de l'agent, avec refus des fenêtres contaminées
 mcp_server.py       serveur MCP : lecture d'état + tilts bornés, jamais de poids directs
 fetch_history.py    reconstruit le CSV de recherche depuis un exchange (à lancer chez toi)
-run_backtest.py / run_validation.py / run_risk_rules.py / run_live.py / run_agent.py / run_agent_replay.py
-tests/              28 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
+run_backtest.py / run_validation.py / run_risk_rules.py / run_barrier_study.py / run_live.py / run_agent.py / run_agent_replay.py
+tests/              32 tests, dont l'absence de look-ahead et les invariants de l'enveloppe
 data/prices_daily.csv   closes quotidiens BTC/ETH (Coin Metrics), 2010 → 2026-05
 ```
 
