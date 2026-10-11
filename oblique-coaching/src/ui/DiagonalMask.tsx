@@ -35,8 +35,9 @@ export function DiagonalMask({ children, progress, className = '', delay = 0 }: 
 
   return (
     <div ref={ref} className={`relative overflow-hidden ${className}`}>
-      <m.div className="relative -ml-[25%] w-[150%]" style={{ x: maskX, skewX: -14 }}>
-        <m.div className="ml-[16.6667%] w-[66.6667%]" style={{ x: innerX, skewX: 14 }}>
+      {/* overflow-hidden : c'est ce conteneur incliné qui découpe le contenu */}
+      <m.div className="relative -ml-[25%] h-full w-[150%] overflow-hidden" style={{ x: maskX, skewX: -14 }}>
+        <m.div className="ml-[16.6667%] h-full w-[66.6667%]" style={{ x: innerX, skewX: 14 }}>
           {children}
         </m.div>
         <m.span
