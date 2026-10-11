@@ -2,9 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // URL absolue nécessaire pour l'aperçu LinkedIn (og:image).
-// Sur Vercel, VERCEL_PROJECT_PRODUCTION_URL est injectée automatiquement au build.
+// Injectée automatiquement au build : URL sur Netlify, VERCEL_PROJECT_PRODUCTION_URL sur Vercel.
 const siteUrl = (
   process.env.SITE_URL ||
+  (process.env.NETLIFY && process.env.URL) ||
   (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`) ||
   (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) ||
   'https://oblique-coaching.vercel.app'
