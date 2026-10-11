@@ -13,7 +13,10 @@ function StepCard({ step, index, progress }: { step: Step; index: number; progre
     <li className={progress ? '[grid-area:stack] md:[grid-area:auto]' : ''} style={{ zIndex: index + 1 }}>
       <DiagonalMask progress={progress}>
         <article className="relative flex min-h-[300px] flex-col justify-between overflow-hidden bg-cream p-7 text-ink md:min-h-[400px] md:p-9">
-          <span aria-hidden="true" className="display oblique absolute -right-3 -top-6 text-[9rem] leading-none text-wine/[0.07]">
+          <span
+            aria-hidden="true"
+            className="display oblique absolute -right-3 -top-6 text-[9rem] leading-none text-wine/[0.07]"
+          >
             {step.n}
           </span>
           <div>
@@ -60,7 +63,11 @@ export function Method() {
           <div className="mb-10 flex flex-col gap-4 md:mb-14 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="eyebrow mb-4 text-cream/75">La méthode Oblique</p>
-              <RevealTitle id="methode-title" lines={['3 étapes.', 'Zéro improvisation.']} className="text-[clamp(2.9rem,12vw,6.5rem)]" />
+              <RevealTitle
+                id="methode-title"
+                lines={['3 étapes.', 'Zéro improvisation.']}
+                className="text-[clamp(2.9rem,12vw,6.5rem)]"
+              />
             </div>
             <p className="hidden max-w-sm text-cream/80 md:block">
               Un cadre clair, du premier rendez-vous au résultat. Chaque étape prépare la suivante.

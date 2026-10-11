@@ -53,7 +53,11 @@ export function FAQ() {
       <div className="mx-auto grid max-w-7xl gap-10 px-5 md:grid-cols-[0.8fr_1.2fr] md:px-8">
         <div>
           <p className="eyebrow mb-4 text-bolt-dark">Questions fréquentes</p>
-          <RevealTitle id="faq-title" lines={['Avant de', 'commencer.']} className="text-[clamp(2.9rem,12vw,5.5rem)] text-wine" />
+          <RevealTitle
+            id="faq-title"
+            lines={['Avant de', 'commencer.']}
+            className="text-[clamp(2.9rem,12vw,5.5rem)] text-wine"
+          />
         </div>
         <ul className="border-t border-ink/15">
           {ITEMS.map((f, i) => (

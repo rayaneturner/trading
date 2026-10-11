@@ -50,7 +50,11 @@ export function Hero() {
       className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden bg-wine pb-8 pt-24 md:pb-20 md:pt-28"
     >
       {/* Décor : grand éclair translucide (repris de la bannière) + grain */}
-      <m.div aria-hidden="true" className="pointer-events-none absolute -right-[18%] -top-[6%] h-[115%] md:-right-[4%]" style={{ y: boltY }}>
+      <m.div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-[18%] -top-[6%] h-[115%] md:-right-[4%]"
+        style={{ y: boltY }}
+      >
         <Bolt className="h-full w-auto text-wine-soft opacity-70" />
       </m.div>
       <div aria-hidden="true" className="grain pointer-events-none absolute inset-0" />
@@ -112,7 +116,10 @@ export function Hero() {
             <a href="#methode" className="btn btn-ghost hidden sm:inline-flex">
               {CTA.secondary}
             </a>
-            <a href="#methode" className="self-start py-2 text-sm font-semibold uppercase tracking-[0.12em] text-cream/85 underline decoration-bolt decoration-2 underline-offset-[6px] sm:hidden">
+            <a
+              href="#methode"
+              className="self-start py-2 text-sm font-semibold uppercase tracking-[0.12em] text-cream/85 underline decoration-bolt decoration-2 underline-offset-[6px] sm:hidden"
+            >
               {CTA.secondary}
             </a>
           </div>

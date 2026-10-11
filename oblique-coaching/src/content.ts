@@ -28,9 +28,21 @@ export const HERO = {
   kicker: 'Coach sportif & nutrition · Bourges',
   // Deux lignes de titre. "CONTRÔLE." est mis en rouge.
   lines: ['REPRENEZ', 'LE CONTRÔLE.'],
-  sub: 'Corps, santé, performances : un accompagnement sportif et nutritionnel sur mesure, à domicile, en entreprise ou en ligne. Bourges & alentours.',
+  sub: '(Re)prenez le sport pour (re)prendre soin de vous : coaching sportif et nutrition sur mesure, à domicile, en entreprise ou en ligne. Bourges & alentours.',
   // Preuves sociales placées tôt (issues de la bio Instagram du client)
   proofs: ['Premier bilan offert', '+30 personnes accompagnées', 'À domicile · En ligne'],
+}
+
+// Section problème : le visiteur doit se reconnaître avant qu'on lui présente la méthode
+export const PROBLEM = {
+  title: ['Le plus dur,', 'c’est de s’y remettre.'],
+  pains: [
+    'Vous avez arrêté le sport depuis des mois, parfois des années, et vous ne savez plus par où recommencer.',
+    'Vous avez déjà essayé seul : un abonnement, de bonnes résolutions, puis la motivation qui s’essouffle au bout de quelques semaines.',
+    'Votre agenda est plein. Chaque séance doit compter, sans risque de vous blesser.',
+  ],
+  promise:
+    'Pour reprendre durablement, il vous faut trois choses : un cadre, un plan qui tient dans votre semaine, et quelqu’un qui vous suit. C’est exactement la méthode Oblique.',
 }
 
 export const MARQUEE = ['PERSONAL TRAINING', 'COACHING EN ENTREPRISE', 'PRÉPARATION PHYSIQUE', 'NUTRITION']
@@ -91,6 +103,21 @@ export const SERVICES: Service[] = [
     points: ['Habitudes durables', 'Composition corporelle', 'En complément de l’entraînement'],
   },
 ]
+
+// Offre réelle du client (story Instagram « Challenge Oblique septembre »)
+export const CHALLENGE = {
+  title: 'Challenge Oblique',
+  text: '4 mercredis pour retrouver la forme et reprendre le sport, en groupe.',
+  next: '[Date de la prochaine session]', // [PLACEHOLDER]
+}
+
+// Note affichée au prospect pendant la phase de maquette. Passer enabled à false pour la mise en ligne.
+export const PITCH = {
+  enabled: true,
+  title: 'Jahen, cette maquette a été conçue pour vous.',
+  text: 'Vos couleurs, votre méthode, votre offre. Les éléments en pointillés attendent vos vraies informations : aucun avis ni chiffre n’a été inventé.',
+  by: 'ScaleSync',
+}
 
 // value: nombre réel → compteur animé. value: null → placeholder visible.
 export const STATS: { value: number | null; prefix?: string; suffix?: string; label: string; note?: string }[] = [

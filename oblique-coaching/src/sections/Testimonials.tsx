@@ -8,7 +8,11 @@ export function Testimonials() {
     <section aria-labelledby="temoignages-title" className="relative bg-ink py-20 md:py-28">
       <div className="mx-auto max-w-7xl px-5 md:px-8">
         <p className="eyebrow mb-4 text-cream/75">Témoignages & transformations</p>
-        <RevealTitle id="temoignages-title" lines={['Des résultats.', 'Leurs mots.']} className="text-[clamp(2.9rem,12vw,6.5rem)]" />
+        <RevealTitle
+          id="temoignages-title"
+          lines={['Des résultats.', 'Leurs mots.']}
+          className="text-[clamp(2.9rem,12vw,6.5rem)]"
+        />
         <ul className="mt-12 grid gap-5 md:mt-16 md:grid-cols-3">
           {TESTIMONIALS.map((t, i) => (
             <li key={t.slot}>

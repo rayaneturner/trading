@@ -12,26 +12,56 @@ export function Footer() {
           <div>
             <Logo className="text-6xl md:text-7xl" />
             <p className="mt-3 text-cream/75">{BRAND.slogan}</p>
-            <p className="mt-1 text-sm text-cream/70">
-              {BRAND.coach} · Coach sportif & expert en nutrition · Bourges
-            </p>
+            <p className="mt-1 text-sm text-cream/70">{BRAND.coach} · Coach sportif & expert en nutrition · Bourges</p>
           </div>
           <nav aria-label="Liens du pied de page">
             <ul className="flex flex-wrap gap-x-6 gap-y-3 text-sm font-medium">
-              <li><a className="hover:text-bolt-light" href="#methode">Méthode</a></li>
-              <li><a className="hover:text-bolt-light" href="#services">Services</a></li>
-              <li><a className="hover:text-bolt-light" href="#faq">FAQ</a></li>
-              <li><a className="hover:text-bolt-light" href={LINKS.instagram} target="_blank" rel="noopener noreferrer">Instagram</a></li>
-              <li><a className="hover:text-bolt-light" href={LINKS.linkedin} target="_blank" rel="noopener noreferrer">LinkedIn</a></li>
-              <li><span className="text-cream/80"><WithPh text={LINKS.email} /></span></li>
+              <li>
+                <a className="hover:text-bolt-light" href="#methode">
+                  Méthode
+                </a>
+              </li>
+              <li>
+                <a className="hover:text-bolt-light" href="#services">
+                  Services
+                </a>
+              </li>
+              <li>
+                <a className="hover:text-bolt-light" href="#faq">
+                  FAQ
+                </a>
+              </li>
+              <li>
+                <a className="hover:text-bolt-light" href={LINKS.instagram} target="_blank" rel="noopener noreferrer">
+                  Instagram
+                </a>
+              </li>
+              <li>
+                <a className="hover:text-bolt-light" href={LINKS.linkedin} target="_blank" rel="noopener noreferrer">
+                  LinkedIn
+                </a>
+              </li>
+              <li>
+                <span className="text-cream/80">
+                  <WithPh text={LINKS.email} />
+                </span>
+              </li>
             </ul>
           </nav>
         </div>
 
         <div className="mt-12 flex flex-col gap-4 border-t border-cream/10 pt-6 text-xs text-cream/70 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-4">
-            <span>© {new Date().getFullYear()} {BRAND.name}</span>
-            <button type="button" className="underline underline-offset-4 hover:text-cream" aria-expanded={legal} aria-controls="mentions" onClick={() => setLegal((v) => !v)}>
+            <span>
+              © {new Date().getFullYear()} {BRAND.name}
+            </span>
+            <button
+              type="button"
+              className="underline underline-offset-4 hover:text-cream"
+              aria-expanded={legal}
+              aria-controls="mentions"
+              onClick={() => setLegal((v) => !v)}
+            >
               Mentions légales
             </button>
           </div>

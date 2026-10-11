@@ -1,8 +1,9 @@
 import { m, useMotionValue, useSpring, useTransform } from 'framer-motion'
 import type { PointerEvent } from 'react'
-import { CTA, LINKS, SERVICES, type Service } from '../content'
+import { CHALLENGE, CTA, LINKS, SERVICES, type Service } from '../content'
 import { Bolt } from '../ui/Bolt'
 import { useFinePointer, useReduced } from '../ui/hooks'
+import { Ph } from '../ui/Ph'
 import { FadeUp, RevealTitle } from '../ui/Reveal'
 
 function Card({ s, i }: { s: Service; i: number }) {
@@ -44,7 +45,10 @@ function Card({ s, i }: { s: Service; i: number }) {
         </div>
 
         <p className={`eyebrow relative ${pro ? 'text-bolt-light' : 'text-cream/75'}`}>{s.tag}</p>
-        <h3 className="display oblique relative mt-4 max-w-[12ch] text-[2.6rem] md:text-5xl" style={{ transform: 'translateZ(30px) skewX(-8deg)' }}>
+        <h3
+          className="display oblique relative mt-4 max-w-[12ch] text-[2.6rem] md:text-5xl"
+          style={{ transform: 'translateZ(30px) skewX(-8deg)' }}
+        >
           {s.title}
         </h3>
         <p className="relative mt-5 text-[16px] leading-relaxed text-cream/85">{s.text}</p>
@@ -79,7 +83,11 @@ export function Services() {
         <div className="mb-12 grid gap-6 md:mb-16 md:grid-cols-2 md:items-end">
           <div>
             <p className="eyebrow mb-4 text-cream/75">Services</p>
-            <RevealTitle id="services-title" lines={['Un objectif.', 'Quatre terrains.']} className="text-[clamp(2.9rem,12vw,6.5rem)]" />
+            <RevealTitle
+              id="services-title"
+              lines={['Un objectif.', 'Quatre terrains.']}
+              className="text-[clamp(2.9rem,12vw,6.5rem)]"
+            />
           </div>
           <FadeUp>
             <p className="max-w-md text-cream/85 md:justify-self-end">
@@ -92,8 +100,27 @@ export function Services() {
             <Card key={s.id} s={s} i={i} />
           ))}
         </div>
+        <FadeUp className="mt-5">
+          <div className="relative flex flex-col gap-5 overflow-hidden bg-bolt-cta p-7 md:flex-row md:items-center md:justify-between md:p-9">
+            <Bolt className="pointer-events-none absolute -right-4 -top-6 h-48 w-auto text-ink/15" />
+            <div className="relative">
+              <p className="eyebrow text-cream">Format collectif</p>
+              <h3 className="display oblique mt-2 text-4xl md:text-5xl">{CHALLENGE.title}</h3>
+              <p className="mt-3 max-w-xl text-[16px] leading-relaxed text-cream">{CHALLENGE.text}</p>
+            </div>
+            <p className="relative text-sm font-semibold uppercase tracking-[0.1em] text-cream">
+              Prochaine session : <Ph>{CHALLENGE.next}</Ph>
+            </p>
+          </div>
+        </FadeUp>
         <FadeUp className="mt-12 flex justify-center">
-          <a href={LINKS.booking} target="_blank" rel="noopener noreferrer" className="btn btn-primary" aria-label={`${CTA.primary} (nouvel onglet)`}>
+          <a
+            href={LINKS.booking}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary"
+            aria-label={`${CTA.primary} (nouvel onglet)`}
+          >
             {CTA.primary}
             <Bolt className="h-4 w-auto" />
           </a>

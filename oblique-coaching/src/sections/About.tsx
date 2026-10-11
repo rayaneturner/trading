@@ -1,6 +1,6 @@
 import { m, useScroll, useTransform } from 'framer-motion'
 import { useRef } from 'react'
-import { ABOUT, BRAND } from '../content'
+import { ABOUT, BRAND, LINKS } from '../content'
 import { Bolt } from '../ui/Bolt'
 import { DiagonalMask } from '../ui/DiagonalMask'
 import { Ph, WithPh } from '../ui/Ph'
@@ -13,7 +13,12 @@ export function About() {
   const boltY = useTransform(scrollYProgress, [0, 1], ['-14%', '14%'])
 
   return (
-    <section id="a-propos" ref={ref} aria-labelledby="about-title" className="on-cream relative overflow-hidden bg-cream pb-20 pt-8 text-ink md:pb-28">
+    <section
+      id="a-propos"
+      ref={ref}
+      aria-labelledby="about-title"
+      className="on-cream relative overflow-hidden bg-cream pb-20 pt-8 text-ink md:pb-28"
+    >
       <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 md:grid-cols-[0.9fr_1.1fr] md:gap-16 md:px-8">
         <div className="relative mx-auto w-full max-w-[420px]">
           <m.div aria-hidden="true" className="absolute -left-[8%] -top-[10%] h-[120%]" style={{ y: boltY }}>
@@ -50,13 +55,39 @@ export function About() {
             </p>
           </FadeUp>
           <FadeUp delay={0.1}>
-            <ul aria-label="Diplômes et certifications" className="mt-8 flex flex-wrap gap-3 text-sm font-semibold uppercase tracking-[0.1em]">
+            <ul
+              aria-label="Diplômes et certifications"
+              className="mt-8 flex flex-wrap gap-3 text-sm font-semibold uppercase tracking-[0.1em]"
+            >
               {ABOUT.credentials.map((c) => (
-                <li key={c} className="bg-wine px-4 py-2.5 text-cream [clip-path:polygon(6px_0,100%_0,calc(100%-6px)_100%,0_100%)]">
+                <li
+                  key={c}
+                  className="bg-wine px-4 py-2.5 text-cream [clip-path:polygon(6px_0,100%_0,calc(100%-6px)_100%,0_100%)]"
+                >
                   <Ph>{c}</Ph>
                 </li>
               ))}
             </ul>
+            <a
+              href={LINKS.instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-8 inline-flex items-center gap-3 text-sm font-semibold uppercase tracking-[0.12em] text-wine underline decoration-bolt decoration-2 underline-offset-[6px]"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" />
+              </svg>
+              Mes conseils au quotidien : @oblique.coaching
+            </a>
           </FadeUp>
         </div>
       </div>

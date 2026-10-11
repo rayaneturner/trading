@@ -12,9 +12,5 @@ export function Ph({ children }: { children: ReactNode }) {
 // Rend automatiquement les segments [ ... ] d'une chaîne en placeholders
 export function WithPh({ text }: { text: string }) {
   const parts = text.split(/(\[[^\]]+\])/g)
-  return (
-    <>
-      {parts.map((p, i) => (p.startsWith('[') && p.endsWith(']') ? <Ph key={i}>{p}</Ph> : p))}
-    </>
-  )
+  return <>{parts.map((p, i) => (p.startsWith('[') && p.endsWith(']') ? <Ph key={i}>{p}</Ph> : p))}</>
 }

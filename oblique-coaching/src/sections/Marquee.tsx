@@ -17,9 +17,12 @@ function Row() {
 
 export function Marquee() {
   return (
-    <section aria-label="Domaines d'intervention" className="relative z-10 overflow-hidden bg-wine py-6">
+    <section aria-label="Domaines d'intervention" className="relative z-10 overflow-hidden bg-[linear-gradient(to_bottom,#3B0016_50%,#0B0B0B_50%)] py-6">
       <p className="sr-only">{MARQUEE.join(', ')}</p>
-      <div aria-hidden="true" className="-mx-[5%] -rotate-[3deg] bg-bolt py-4 text-cream shadow-[0_20px_40px_-20px_rgba(0,0,0,0.6)]">
+      <div
+        aria-hidden="true"
+        className="-mx-[5%] -rotate-[3deg] bg-bolt py-4 text-cream shadow-[0_20px_40px_-20px_rgba(0,0,0,0.6)]"
+      >
         <div className="marquee-track flex w-max">
           <Row />
           <Row />

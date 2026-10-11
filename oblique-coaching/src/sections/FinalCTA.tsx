@@ -26,7 +26,10 @@ export function FinalCTA() {
       className="on-red relative flex min-h-[100svh] items-center overflow-hidden bg-bolt-cta py-24 text-cream"
     >
       {/* Diagonale sombre */}
-      <div aria-hidden="true" className="absolute inset-0 bg-bolt-dark [clip-path:polygon(62%_0,100%_0,100%_100%,28%_100%)]" />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-bolt-dark [clip-path:polygon(62%_0,100%_0,100%_100%,28%_100%)]"
+      />
       <m.div aria-hidden="true" className="absolute -right-[10%] top-0 h-full" style={{ y: boltY }}>
         <Bolt className="h-full w-auto text-ink/15" />
       </m.div>
@@ -34,12 +37,21 @@ export function FinalCTA() {
 
       <div className="relative mx-auto w-full max-w-7xl px-5 md:px-8">
         <p className="eyebrow mb-5 text-cream">Premier bilan offert · sans engagement</p>
-        <RevealTitle id="cta-title" lines={['Le premier pas,', 'c’est maintenant.']} className="text-[clamp(3.2rem,14vw,9.5rem)]" />
+        <RevealTitle
+          id="cta-title"
+          lines={['Le premier pas,', 'c’est maintenant.']}
+          className="text-[clamp(3.2rem,14vw,9.5rem)]"
+        />
         <p className="mt-8 max-w-xl text-lg leading-relaxed text-cream">
           Réservez votre séance découverte : on fait le point sur vos objectifs et vous repartez avec un plan clair.
         </p>
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-          <MagneticLink href={LINKS.booking} external className="btn btn-dark" ariaLabel={`${CTA.primary} (nouvel onglet)`}>
+          <MagneticLink
+            href={LINKS.booking}
+            external
+            className="btn btn-dark"
+            ariaLabel={`${CTA.primary} (nouvel onglet)`}
+          >
             {CTA.primary}
             <Bolt className="h-4 w-auto text-bolt" />
           </MagneticLink>
