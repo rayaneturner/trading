@@ -1,0 +1,261 @@
+//@version=6
+// BPR Strategy (ICT) — version backtestable de l'indicateur bpr.pine
+//
+// Detection identique a bpr.pine : un BPR est l'intersection d'un FVG haussier
+// et d'un FVG baissier formes a proximite. Le FVG le plus recent donne le biais.
+// La strategie entre sur le RETEST de cette zone, stop de l'autre cote, sortie
+// en RR fixe ou sur la liquidite opposee.
+
+strategy("BPR Strategy (ICT)", "BPR Strat", overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
+     commission_type = strategy.commission.percent, commission_value = 0.02,
+     slippage = 1,
+     process_orders_on_close = true,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ───────────────────────────── Detection ─────────────────────────────
+gD = "Detection BPR"
+confirmBar = input.bool(true,  "Attendre la cloture de la 3e bougie (anti-repaint)", group = gD)
+maxGapAge  = input.int(20,     "Fenetre max entre les deux FVG (bougies)", minval = 1, maxval = 200, group = gD)
+minOvlATR  = input.float(0.05, "Chevauchement minimum (x ATR14)", minval = 0.0, step = 0.01, group = gD)
+oneUse     = input.bool(true,  "Un FVG ne peut servir qu a un seul BPR", group = gD)
+maxZones   = input.int(10,     "Nombre de BPR suivis", minval = 1, maxval = 50, group = gD)
+
+// ───────────────────────────── Entree ─────────────────────────────
+gE = "Entree"
+sideMode  = input.string("Les deux", "Sens autorise", options = ["Les deux", "Long seul", "Short seul"], group = gE)
+trigMode  = input.string("CE (50%)", "Declencheur du retest", options = ["Contact de la zone", "CE (50%)", "Traversee complete", "Rejet confirme"], group = gE)
+maxWait   = input.int(40, "Bougies max entre formation et retest", minval = 1, maxval = 500, group = gE)
+oneTrade  = input.bool(true, "Une seule position a la fois", group = gE)
+
+// ───────────────────────────── Sortie ─────────────────────────────
+gX = "Sortie"
+stopMode   = input.string("Bord de zone", "Stop", options = ["Bord de zone", "ATR"], group = gX)
+stopBufATR = input.float(0.25, "Marge sous/sur la zone (x ATR14)", minval = 0.0, step = 0.05, group = gX)
+stopAtr    = input.float(1.5,  "Stop = x ATR14 (mode ATR)", minval = 0.1, step = 0.1, group = gX)
+tgtMode    = input.string("RR fixe", "Objectif", options = ["RR fixe", "Liquidite opposee"], group = gX)
+rr         = input.float(2.0, "RR", minval = 0.1, step = 0.1, group = gX)
+pivLen     = input.int(10, "Pivot pour la liquidite opposee", minval = 2, maxval = 100, group = gX)
+minRR      = input.float(1.0, "RR minimum exige pour prendre le trade", minval = 0.0, step = 0.1, group = gX)
+maxHold    = input.int(100, "Duree max en position (bougies)", minval = 1, maxval = 2000, group = gX)
+beAtR      = input.float(0.0, "Break-even a x R (0 = desactive)", minval = 0.0, step = 0.25, group = gX)
+
+// ───────────────────────────── Risque ─────────────────────────────
+gR = "Risque"
+useRiskPct = input.bool(true, "Taille calculee sur un risque fixe", group = gR)
+riskPct    = input.float(1.0, "Risque par trade (% du capital)", minval = 0.01, step = 0.1, group = gR)
+
+// ───────────────────────────── Filtres ─────────────────────────────
+gFl = "Filtres"
+useEma  = input.bool(false, "Filtre EMA (long au-dessus, short en-dessous)", group = gFl)
+emaLen  = input.int(200, "Longueur EMA", minval = 1, group = gFl)
+useSess = input.bool(false, "Filtre horaire", group = gFl)
+sess    = input.session("0800-1700", "Session", group = gFl)
+useDate = input.bool(false, "Filtre de dates", group = gFl)
+dFrom   = input.time(timestamp("01 Jan 2020 00:00"), "Depuis", group = gFl)
+dTo     = input.time(timestamp("01 Jan 2030 00:00"), "Jusqu a", group = gFl)
+
+gS = "Style"
+bullCol = input.color(color.new(color.teal, 80), "BPR haussier", group = gS)
+bearCol = input.color(color.new(color.red,  80), "BPR baissier", group = gS)
+drawZones = input.bool(true, "Dessiner les zones", group = gS)
+
+// ───────────────────────────── Types ─────────────────────────────
+type FVG
+    int   bar
+    float top
+    float bot
+    bool  bull
+    bool  used
+
+type BPR
+    int   bar
+    float top
+    float bot
+    bool  bull
+    bool  touched
+    bool  traded
+    bool  dead
+    box   bx
+
+var array<FVG> fvgs  = array.new<FVG>()
+var array<BPR> zones = array.new<BPR>()
+
+atr = ta.atr(14)
+ema = ta.ema(close, emaLen)
+
+inSess = not useSess or not na(time(timeframe.period, sess))
+inDate = not useDate or (time >= dFrom and time <= dTo)
+allowL = sideMode != "Short seul"
+allowS = sideMode != "Long seul"
+
+// dernieres liquidites confirmees
+var float lastPH = na
+var float lastPL = na
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+// ───────────────────────── Detection des FVG ─────────────────────────
+off = confirmBar ? 1 : 0
+
+newBullFvg = bar_index > off + 2 and low[off]  > high[off + 2]
+newBearFvg = bar_index > off + 2 and high[off] < low[off + 2]
+
+if newBullFvg or newBearFvg
+    bool isBull = newBullFvg
+    float t = isBull ? low[off]      : low[off + 2]
+    float b = isBull ? high[off + 2] : high[off]
+    FVG f = FVG.new(bar_index - off, t, b, isBull, false)
+
+    int found = -1
+    for i = array.size(fvgs) - 1 to 0
+        if i < 0
+            break
+        FVG g = array.get(fvgs, i)
+        if g.bull != f.bull and (not oneUse or not g.used) and f.bar - g.bar <= maxGapAge
+            float ot = math.min(f.top, g.top)
+            float ob = math.max(f.bot, g.bot)
+            if ot - ob > math.max(minOvlATR * atr, syminfo.mintick)
+                found := i
+                break
+
+    if found >= 0
+        FVG g = array.get(fvgs, found)
+        bool bull = f.bull
+        bool ok = not useEma or (bull ? close > ema : close < ema)
+        if ok
+            f.used := true
+            g.used := true
+            float zt = math.min(f.top, g.top)
+            float zb = math.max(f.bot, g.bot)
+            box bx = na
+            if drawZones
+                color c = bull ? bullCol : bearCol
+                bx := box.new(math.min(f.bar, g.bar) - 2, zt, bar_index + 5, zb,
+                     border_color = c, bgcolor = c, xloc = xloc.bar_index)
+            array.push(zones, BPR.new(bar_index, zt, zb, bull, false, false, false, bx))
+            while array.size(zones) > maxZones
+                BPR old = array.shift(zones)
+                if not na(old.bx)
+                    box.delete(old.bx)
+
+    array.push(fvgs, f)
+
+while array.size(fvgs) > 0 and bar_index - array.get(fvgs, 0).bar > maxGapAge
+    array.shift(fvgs)
+
+// ───────────────────────── Gestion de la position ─────────────────────────
+var float slPx    = na
+var float tpPx    = na
+var float entryPx = na
+var int   entryBar = na
+var bool  beDone  = false
+
+if strategy.position_size != 0
+    // break-even optionnel
+    if beAtR > 0 and not beDone and not na(entryPx) and not na(slPx)
+        float r = math.abs(entryPx - slPx)
+        bool reached = strategy.position_size > 0 ? high >= entryPx + beAtR * r : low <= entryPx - beAtR * r
+        if reached
+            slPx := entryPx
+            beDone := true
+    if strategy.position_size > 0
+        strategy.exit("Sortie L", "BPR L", stop = slPx, limit = tpPx)
+    else
+        strategy.exit("Sortie S", "BPR S", stop = slPx, limit = tpPx)
+    if not na(entryBar) and bar_index - entryBar >= maxHold
+        strategy.close_all(comment = "Temps max")
+else
+    slPx := na
+    tpPx := na
+    entryPx := na
+    entryBar := na
+    beDone := false
+
+// ───────────────────────── Recherche d'un retest ─────────────────────────
+canTrade = inSess and inDate and (not oneTrade or strategy.position_size == 0) and strategy.position_size == 0
+
+if canTrade and array.size(zones) > 0
+    for i = array.size(zones) - 1 to 0
+        if i < 0
+            break
+        BPR z = array.get(zones, i)
+        if z.dead or z.traded or bar_index <= z.bar or bar_index - z.bar > maxWait
+            continue
+        if (z.bull and not allowL) or (not z.bull and not allowS)
+            continue
+        if useEma and (z.bull ? close < ema : close > ema)
+            continue
+
+        float ce = (z.top + z.bot) / 2
+        bool inZone = low <= z.top and high >= z.bot
+        if inZone
+            z.touched := true
+
+        bool trig = false
+        if trigMode == "Contact de la zone"
+            trig := inZone
+        else if trigMode == "CE (50%)"
+            trig := z.bull ? low <= ce and high >= z.bot : high >= ce and low <= z.top
+        else if trigMode == "Traversee complete"
+            trig := z.bull ? low <= z.bot : high >= z.top
+        else
+            // rejet confirme : la zone a ete touchee puis le prix cloture a nouveau hors de la zone
+            trig := z.touched and (z.bull ? close > z.top : close < z.bot)
+
+        if trig
+            float e = close
+            float sl = na
+            if z.bull
+                sl := stopMode == "ATR" ? e - stopAtr * atr : z.bot - stopBufATR * atr
+            else
+                sl := stopMode == "ATR" ? e + stopAtr * atr : z.top + stopBufATR * atr
+            float risk = math.abs(e - sl)
+            if risk > syminfo.mintick
+                float tp = na
+                if tgtMode == "RR fixe"
+                    tp := z.bull ? e + rr * risk : e - rr * risk
+                else
+                    tp := z.bull ? lastPH : lastPL
+                    if na(tp) or (z.bull ? tp <= e : tp >= e)
+                        tp := z.bull ? e + rr * risk : e - rr * risk
+                float gotRR = math.abs(tp - e) / risk
+                if gotRR >= minRR
+                    float qty = (strategy.equity * riskPct / 100) / risk
+                    bool sized = useRiskPct and qty > 0
+                    z.traded := true
+                    z.dead := true
+                    slPx := sl
+                    tpPx := tp
+                    entryPx := e
+                    entryBar := bar_index
+                    beDone := false
+                    if z.bull
+                        if sized
+                            strategy.entry("BPR L", strategy.long, qty = qty)
+                        else
+                            strategy.entry("BPR L", strategy.long)
+                    else
+                        if sized
+                            strategy.entry("BPR S", strategy.short, qty = qty)
+                        else
+                            strategy.entry("BPR S", strategy.short)
+                    break
+
+// ───────────────────── Nettoyage / invalidation des zones ─────────────────────
+if array.size(zones) > 0
+    for i = array.size(zones) - 1 to 0
+        if i < 0
+            break
+        BPR z = array.get(zones, i)
+        if not z.dead and (z.bull ? close < z.bot : close > z.top)
+            z.dead := true
+        if not na(z.bx) and not z.dead
+            box.set_right(z.bx, bar_index + 5)
+
+plot(useEma ? ema : na, "EMA", color = color.new(color.orange, 40))
