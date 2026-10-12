@@ -107,9 +107,12 @@ makeBpr(FVG a, FVG b, bool bull) =>
     BPR.new(bar_index, t, bo, bull, false, false, bx, ce, lb)
 
 killBpr(BPR z) =>
-    box.delete(z.bx)
-    line.delete(z.ce)
-    label.delete(z.lb)
+    if not na(z.bx)
+        box.delete(z.bx)
+    if not na(z.ce)
+        line.delete(z.ce)
+    if not na(z.lb)
+        label.delete(z.lb)
 
 // ───────────── Enregistrement du FVG + recherche du contre-FVG ─────────────
 if newBullFvg or newBearFvg
@@ -146,7 +149,8 @@ if newBullFvg or newBearFvg
 // purge des FVG trop anciens
 while array.size(fvgs) > 0 and bar_index - array.get(fvgs, 0).bar > maxGapAge
     FVG old = array.shift(fvgs)
-    box.delete(old.bx)
+    if not na(old.bx)
+        box.delete(old.bx)
 
 // ───────────────────── Suivi des zones existantes ─────────────────────
 if array.size(zones) > 0
