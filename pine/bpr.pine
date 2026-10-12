@@ -1,0 +1,198 @@
+//@version=6
+// BPR — Balanced Price Range (ICT)
+//
+// Définition retenue : un BPR est la ZONE DE CHEVAUCHEMENT entre un FVG haussier
+// et un FVG baissier formés à proximité l'un de l'autre. Le second FVG (le plus
+// récent) donne le biais :
+//   - FVG baissier puis FVG haussier qui le recouvre -> BPR haussier (support)
+//   - FVG haussier puis FVG baissier qui le recouvre -> BPR baissier (résistance)
+// La zone utile est l'intersection : [max(bas), min(hauts)].
+//
+// FVG haussier confirmé en i : low[i] > high[i-2]   -> zone [high[i-2], low[i]]
+// FVG baissier confirmé en i : high[i] < low[i-2]   -> zone [high[i], low[i-2]]
+
+indicator("BPR — Balanced Price Range (ICT)", "BPR", overlay = true,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ───────────────────────────── Inputs ─────────────────────────────
+gD = "Détection"
+confirmBar = input.bool(true,  "Attendre la clôture de la 3e bougie (anti-repaint)", group = gD)
+maxGapAge  = input.int(20,     "Fenêtre max entre les deux FVG (bougies)", minval = 1, maxval = 200, group = gD)
+minOvlATR  = input.float(0.05, "Chevauchement minimum (× ATR14)", minval = 0.0, step = 0.01, group = gD)
+oneUse     = input.bool(true,  "Un FVG ne peut servir qu'à un seul BPR", group = gD)
+maxZones   = input.int(10,     "Nombre de BPR conservés", minval = 1, maxval = 100, group = gD)
+
+gL = "Cycle de vie"
+keepMitig = input.bool(true, "Garder la zone après le premier retest (sinon suppression)", group = gL)
+keepInval = input.bool(false,"Garder la zone après invalidation (sinon suppression)", group = gL)
+extendN   = input.int(10,    "Extension à droite (bougies)", minval = 0, maxval = 200, group = gL)
+
+gF = "Filtre tendance (optionnel)"
+useEma = input.bool(false, "N'afficher que les BPR alignés avec une EMA", group = gF)
+emaLen = input.int(200,    "Longueur EMA", minval = 1, group = gF)
+
+gS = "Style"
+bullCol = input.color(color.new(color.teal, 75), "BPR haussier", group = gS)
+bearCol = input.color(color.new(color.red,  75), "BPR baissier", group = gS)
+deadCol = input.color(color.new(color.gray, 88), "Zone morte",    group = gS)
+showCE  = input.bool(true,  "Afficher le CE (50 % de la zone)", group = gS)
+showLbl = input.bool(true,  "Afficher les étiquettes", group = gS)
+showFvg = input.bool(false, "Afficher les FVG bruts",   group = gS)
+fvgCol  = input.color(color.new(color.gray, 85), "Couleur FVG bruts", group = gS)
+
+// ───────────────────────────── Types ─────────────────────────────
+type FVG
+    int   bar          // bougie de confirmation
+    float top
+    float bot
+    bool  bull
+    bool  used
+    box   bx
+
+type BPR
+    int   bar
+    float top
+    float bot
+    bool  bull
+    bool  mitigated
+    bool  dead
+    box   bx
+    line  ce
+    label lb
+
+var array<FVG> fvgs = array.new<FVG>()
+var array<BPR> zones = array.new<BPR>()
+
+atr = ta.atr(14)
+ema = ta.ema(close, emaLen)
+
+bool sigNewBull    = false
+bool sigNewBear    = false
+bool sigRetestBull = false
+bool sigRetestBear = false
+bool sigInval      = false
+
+// ───────────────────────── Détection des FVG ─────────────────────────
+off = confirmBar ? 1 : 0
+
+newBullFvg = bar_index > off + 2 and low[off]  > high[off + 2]
+newBearFvg = bar_index > off + 2 and high[off] < low[off + 2]
+
+makeFvg(bool isBull) =>
+    float t = isBull ? low[off]      : low[off + 2]
+    float b = isBull ? high[off + 2] : high[off]
+    int   i = bar_index - off
+    box bx = na
+    if showFvg
+        bx := box.new(i - 2, t, i, b, border_color = color.new(color.gray, 60),
+             bgcolor = fvgCol, xloc = xloc.bar_index)
+    FVG.new(i, t, b, isBull, false, bx)
+
+// ───────────────────── Construction d'un BPR ─────────────────────
+makeBpr(FVG a, FVG b, bool bull) =>
+    float t = math.min(a.top, b.top)
+    float bo = math.max(a.bot, b.bot)
+    int   l = math.min(a.bar, b.bar) - 2
+    color c = bull ? bullCol : bearCol
+    box bx = box.new(l, t, bar_index + extendN, bo, border_color = c, bgcolor = c, xloc = xloc.bar_index)
+    line ce = na
+    if showCE
+        ce := line.new(l, (t + bo) / 2, bar_index + extendN, (t + bo) / 2,
+             xloc = xloc.bar_index, color = c, style = line.style_dashed)
+    label lb = na
+    if showLbl
+        lb := label.new(bar_index + extendN, bull ? bo : t, bull ? "BPR +" : "BPR −",
+             xloc = xloc.bar_index, style = bull ? label.style_label_up : label.style_label_down,
+             color = color.new(c, 40), textcolor = chart.fg_color, size = size.tiny)
+    BPR.new(bar_index, t, bo, bull, false, false, bx, ce, lb)
+
+killBpr(BPR z) =>
+    box.delete(z.bx)
+    line.delete(z.ce)
+    label.delete(z.lb)
+
+// ───────────── Enregistrement du FVG + recherche du contre-FVG ─────────────
+if newBullFvg or newBearFvg
+    FVG f = makeFvg(newBullFvg)
+
+    // on cherche le FVG opposé le plus récent qui chevauche
+    int found = -1
+    for i = array.size(fvgs) - 1 to 0
+        if i < 0
+            break
+        FVG g = array.get(fvgs, i)
+        if g.bull != f.bull and (not oneUse or not g.used) and f.bar - g.bar <= maxGapAge
+            float t = math.min(f.top, g.top)
+            float b = math.max(f.bot, g.bot)
+            if t - b > math.max(minOvlATR * atr, syminfo.mintick)
+                found := i
+                break
+
+    if found >= 0
+        FVG g = array.get(fvgs, found)
+        bool bull = f.bull                       // le FVG le plus récent donne le biais
+        bool ok = not useEma or (bull ? close > ema : close < ema)
+        if ok
+            f.used := true
+            g.used := true
+            array.push(zones, makeBpr(f, g, bull))
+            sigNewBull := bull
+            sigNewBear := not bull
+            while array.size(zones) > maxZones
+                killBpr(array.shift(zones))
+
+    array.push(fvgs, f)
+
+// purge des FVG trop anciens
+while array.size(fvgs) > 0 and bar_index - array.get(fvgs, 0).bar > maxGapAge
+    FVG old = array.shift(fvgs)
+    box.delete(old.bx)
+
+// ───────────────────── Suivi des zones existantes ─────────────────────
+if array.size(zones) > 0
+    for i = array.size(zones) - 1 to 0
+        BPR z = array.get(zones, i)
+
+        if not z.dead
+            // retest : le prix revient dans la zone après sa formation
+            if not z.mitigated and bar_index > z.bar and low <= z.top and high >= z.bot
+                z.mitigated := true
+                sigRetestBull := sigRetestBull or z.bull
+                sigRetestBear := sigRetestBear or not z.bull
+                if not keepMitig
+                    killBpr(z)
+                    array.remove(zones, i)
+                    z.dead := true
+
+            // invalidation : clôture au-delà de la zone
+            if not z.dead and (z.bull ? close < z.bot : close > z.top)
+                z.dead := true
+                sigInval := true
+                if keepInval
+                    box.set_bgcolor(z.bx, deadCol)
+                    box.set_border_color(z.bx, deadCol)
+                    if not na(z.ce)
+                        line.set_color(z.ce, deadCol)
+                    if not na(z.lb)
+                        label.set_color(z.lb, deadCol)
+                else
+                    killBpr(z)
+                    array.remove(zones, i)
+
+            // extension à droite tant que la zone est vivante
+            if not z.dead
+                box.set_right(z.bx, bar_index + extendN)
+                if not na(z.ce)
+                    line.set_x2(z.ce, bar_index + extendN)
+                if not na(z.lb)
+                    label.set_x(z.lb, bar_index + extendN)
+
+// ───────────────────────────── Alertes ─────────────────────────────
+alertcondition(sigNewBull,    "BPR haussier formé",  "Nouveau BPR haussier sur {{ticker}} ({{interval}})")
+alertcondition(sigNewBear,    "BPR baissier formé",  "Nouveau BPR baissier sur {{ticker}} ({{interval}})")
+alertcondition(sigRetestBull, "Retest BPR haussier", "Retest d'un BPR haussier sur {{ticker}} ({{interval}})")
+alertcondition(sigRetestBear, "Retest BPR baissier", "Retest d'un BPR baissier sur {{ticker}} ({{interval}})")
+alertcondition(sigInval,      "BPR invalidé",        "BPR invalidé sur {{ticker}} ({{interval}})")
+
+plotshape(sigRetestBull and showLbl, "Retest +", shape.triangleup,   location.belowbar, color.teal, size = size.tiny)
+plotshape(sigRetestBear and showLbl, "Retest −", shape.triangledown, location.abovebar, color.red,  size = size.tiny)
